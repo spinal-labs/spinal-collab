@@ -16,7 +16,7 @@ import {
   type Role,
   type SessionState,
   NON_REPLAYABLE,
-} from '@claude-collab/protocol';
+} from '@spinal/collab-protocol';
 
 export interface Client {
   id: string;

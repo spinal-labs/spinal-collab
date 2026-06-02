@@ -1,5 +1,5 @@
 {
-  "name": "claude-collab",
+  "name": "spinal-collab",
   "version": "0.1.0",
   "private": true,
   "description": "collab — shared Claude Code session over a cloud relay",

@@ -26,7 +26,7 @@ importers:
       '@anthropic-ai/claude-agent-sdk':
         specifier: ^0.1.0
         version: 0.1.77(zod@3.25.76)
-      '@claude-collab/protocol':
+      '@spinal/collab-protocol':
         specifier: workspace:*
         version: link:../protocol
       nanoid:
@@ -47,7 +47,7 @@ importers:
 
   packages/relay:
     dependencies:
-      '@claude-collab/protocol':
+      '@spinal/collab-protocol':
         specifier: workspace:*
         version: link:../protocol
       nanoid:

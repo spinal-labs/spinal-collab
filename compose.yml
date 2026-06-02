@@ -1,23 +1,23 @@
-# claude-collab relay — standalone broker.
+# spinal-collab relay — standalone broker.
 #
 # Naming is namespaced so this can run alongside other stacks on one host without
 # colliding (Compose prefixes every resource with the project name):
-#   project name  : claude-collab
+#   project name  : spinal-collab
 #   service       : relay
-#   container     : claude-collab-relay
-#   image         : claude-collab-relay
+#   container     : spinal-collab-relay
+#   image         : spinal-collab-relay
 #   host port     : 8787  (clear of common dev ports 8000/5432/8080)
 #
 # There is NO backend / database here — the relay is the only process.
-name: claude-collab
+name: spinal-collab
 
 services:
   relay:
     build:
       context: .
       dockerfile: infrastructure/docker/relay/Dockerfile
-    image: claude-collab-relay:dev
-    container_name: claude-collab-relay
+    image: spinal-collab-relay:dev
+    container_name: spinal-collab-relay
     environment:
       - PORT=8787
     ports:

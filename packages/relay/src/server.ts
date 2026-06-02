@@ -17,7 +17,7 @@ import {
   type Author,
   type R2C,
   type Role,
-} from '@claude-collab/protocol';
+} from '@spinal/collab-protocol';
 import { SessionStore } from './sessionStore.js';
 import { type Client, type Session } from './session.js';
 import { secureEquals } from './auth.js';

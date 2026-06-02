@@ -33,27 +33,27 @@ API key**: the Agent SDK reuses the host's existing login.
 
 ## Packages
 
-| package | name | role |
-| --- | --- | --- |
-| `packages/protocol` | `@claude-collab/protocol` | wire types + zod schemas (the contract) |
-| `packages/relay` | `@claude-collab/relay` | the cloud broker |
-| `packages/cli` | `@claude-collab/cli` | the `collab share` / `collab join` binary |
+| package             | name                      | role                                      |
+| ------------------- | ------------------------- | ----------------------------------------- |
+| `packages/protocol` | `@spinal/collab-protocol` | wire types + zod schemas (the contract)   |
+| `packages/relay`    | `@spinal/collab-relay`    | the cloud broker                          |
+| `packages/cli`      | `@spinal/collab`          | the `collab share` / `collab join` binary |
 
 ## Install
 
-`claude-collab` is a Node app (one cross-platform tarball; needs **Node 20+**).
+`spinal-collab` is a Node app (one cross-platform tarball; needs **Node 20+**).
 It drives **your own installed Claude Code** — install that first
 (<https://claude.com/claude-code>) and be logged in.
 
 ```bash
 # curl | sh — downloads the latest GitHub Release, verifies its checksum
-curl -fsSL https://raw.githubusercontent.com/spinal-labs/claude-collab/main/release/cli/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/spinal-labs/spinal-collab/main/release/cli/install.sh | sh
 ```
 
-> Pin a version with `CLAUDE_COLLAB_VERSION=x.y.z`, or point at a fork with
-> `CLAUDE_COLLAB_REPO=owner/repo`.
+> Pin a version with `SPINAL_COLLAB_VERSION=x.y.z`, or point at a fork with
+> `SPINAL_COLLAB_REPO=owner/repo`.
 
-The host resolves the Claude executable via `COLLAB_CLAUDE_PATH`, else `claude`
+The host resolves the Claude executable via `SPINAL_CLAUDE_PATH`, else `claude`
 on `PATH`, else the SDK's bundled copy. Release tooling lives in
 [release/cli](release/cli) (pnpm-deploy tarball + installer); the workflow
 [.github/workflows/collab-cli-release.yaml](.github/workflows/collab-cli-release.yaml)
@@ -64,8 +64,8 @@ no secrets — just the built-in `GITHUB_TOKEN`).
 
 ```bash
 # Installed CLI:
-claude-collab share --name Alice                 # host: prints a share link + join code
-claude-collab join "<share-link>" --name Bob --code <JOINCODE>   # guest
+spinal-collab share --name Alice                 # host: prints a share link + join code
+spinal-collab join "<share-link>" --name Bob --code <JOINCODE>   # guest
 
 # The relay is a separate service. For local dev, run from source (pnpm):
 pnpm install
@@ -84,7 +84,7 @@ When Claude wants to run a tool, only the **host** is asked `y/N`.
 
 **Full how-to:** [USAGE.md](USAGE.md) — roles, every flag and env var,
 in-session commands, recipes (observe-only, resume, remote relay), and
-troubleshooting. Or run `claude-collab help` (and `help share` / `help join`).
+troubleshooting. Or run `spinal-collab help` (and `help share` / `help join`).
 
 ## Deploy the relay (one host, auto-HTTPS)
 
@@ -105,7 +105,7 @@ Hosts then point at it (guests just use the share link the host prints):
 
 ```bash
 COLLAB_RELAY=wss://relay.yourdomain.com COLLAB_CONTROL_TOKEN=<same token> \
-  claude-collab share --name Alice
+  spinal-collab share --name Alice
 ```
 
 Caveats: sessions are in-memory (a relay restart drops active ones) and it's a
@@ -132,3 +132,56 @@ pnpm test
   `session.state: ended` (terminal — the token can't reopen it), the mid-turn
   `(queued)` marker, protocol-version mismatch rejection, and read-only-guest
   enforcement. A synthetic host stands in for the SDK loop.
+  <<<<<<< HEAD
+  =======
+
+## Status (MVP)
+
+Implemented: shared SDK loop; sequenced relay with replay (flagged `replay:true`);
+attribution; host-only tool approval; tool results redacted to metadata-only
+(name · ok/error · size — never raw output); presence + whole-message typing;
+mid-turn `(queued)` markers; reconnect with resume-from-seq; stable guest
+identity via a self-minted `clientId`; `/end` → `ended` for everyone;
+`collab share --resume` to continue the previous SDK conversation
+(`options.resume`); a `PROTOCOL_VERSION` handshake (mismatched clients are
+rejected, not looped); and a terminal UI that gives every speaker — Claude
+included — a colored nameplate plus a sticky status bar (roster · state · your
+mode). `ws://` for localhost, `wss://` to a remote relay (see Transport security).
+
+**Transport security.** The host token and join code travel as WebSocket upgrade
+headers (`x-collab-token` / `x-collab-code`), never in the URL — so they don't
+leak via proxy/access logs or `Referer`. Only the session id (already public in
+the share link) is a query param. Connecting to a **non-localhost** relay over
+plaintext `ws://` is refused; use `wss://`, or set `COLLAB_ALLOW_INSECURE=1` to
+override on a trusted private network. All untrusted text (guest prompts, model
+output, tool summaries) is stripped of terminal control sequences before display,
+so a participant can't repaint the host's screen to spoof the approval prompt.
+
+**Relay hardening.** Frames are capped (`maxPayload` 1 MiB; `user_message`
+content 100k chars). A 30s heartbeat pings clients and `terminate()`s any that
+stop ponging, so a half-open host doesn't hold its slot. Slow consumers whose
+outbound buffer exceeds 4 MiB are dropped (they reconnect + replay). Bad join
+codes are throttled per session (lock after 8, 15s cooldown). Idle sessions —
+empty for 10 min — are reaped, and `/end` deletes immediately (`ended` is
+terminal; the token can't reopen it). Set `COLLAB_CONTROL_TOKEN` on the relay to
+require `Authorization: Bearer <token>` on `POST /sessions` (recommended for any
+non-local deployment); the host sends it from the same env var when minting.
+
+**Accountability & guest policy.** The host keeps an append-only **audit log** at
+`~/.collab/audit/<sessionId>.jsonl` (0600) — every prompt (attributed) and every
+tool request + host decision, where the actions actually run. Guests can be made
+**observe-only**: `spinal-collab share --readonly-guests`, or toggle at runtime
+with `/readonly on` / `/readonly off`. The relay enforces it (a read-only guest's
+prompt is soft-rejected), and guests see the policy in their banner and live.
+
+**Not verified end-to-end:** a real three-terminal run with a live model turn —
+that needs Claude Code installed + authenticated on the host. The automated tests
+exercise everything up to (but not including) the SDK loop itself.
+
+Not yet (see the plan): a real hosted `wss://` relay deploy (the clients already
+refuse plaintext to a remote relay, but there's no hosted endpoint yet);
+host-approves-join handshake; draft/keystroke mirroring; persistence/DB (sessions
+are in-memory; idle ones are reaped and `/end` deletes, but a relay restart still
+drops history); per-tool permission formatting + "which guest triggered this"
+attribution; an optional git-worktree sandbox for the agent; opt-in
+`--share-tool-output`.

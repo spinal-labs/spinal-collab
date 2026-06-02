@@ -4,7 +4,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import type { R2C } from '@claude-collab/protocol';
+import type { R2C } from '@spinal/collab-protocol';
 import { SessionStore } from './sessionStore.js';
 import type { Client } from './session.js';
 

@@ -26,7 +26,7 @@ import {
   type HostEventBody,
   type PermissionDecision,
   type R2C,
-} from '@claude-collab/protocol';
+} from '@spinal/collab-protocol';
 import { AsyncQueue } from './inputQueue.js';
 import { SdkBridge } from './sdkBridge.js';
 import { AuditLog } from './auditLog.js';
@@ -78,7 +78,7 @@ function readPersistedSdkSession(): string | undefined {
  * even when `claude` is not on PATH.
  */
 function resolveClaudeExecutable(): string | undefined {
-  const explicit = process.env.COLLAB_CLAUDE_PATH?.trim();
+  const explicit = process.env.SPINAL_CLAUDE_PATH?.trim();
   if (explicit) return explicit;
   try {
     const found = execFileSync('command', ['-v', 'claude'], {
@@ -356,7 +356,7 @@ export async function runHost(opts: HostOptions): Promise<void> {
   if (!claudePath) {
     render.commit(
       paint(
-        '! Claude Code executable not found. Install Claude Code, or set COLLAB_CLAUDE_PATH to the `claude` binary.',
+        '! Claude Code executable not found. Install Claude Code, or set SPINAL_CLAUDE_PATH to the `claude` binary.',
         ansi.yellow,
       ),
     );

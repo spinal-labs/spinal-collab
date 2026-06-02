@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * `claude-collab` — shared Claude Code session.
+ * `spinal-collab` — shared Claude Code session.
  *
- *   claude-collab share [options]            host a session (runs Claude here)
- *   claude-collab join  <share-link> [opts]  mirror a session + type into it
+ *   spinal-collab share [options]            host a session (runs Claude here)
+ *   spinal-collab join  <share-link> [opts]  mirror a session + type into it
  *
  * `share` runs Claude on THIS machine and prints a link + join code.
  * `join`  mirrors that session and lets you type into it (runs no Claude).
@@ -14,21 +14,21 @@ import { runHost } from './host/hostSession.js';
 import { runGuest } from './guest/guestClient.js';
 import { resolveDisplayName, resolveJoinCode } from './shared/identity.js';
 
-const USAGE = `claude-collab — drive one shared Claude Code session from multiple terminals
+const USAGE = `spinal-collab — drive one shared Claude Code session from multiple terminals
 
 USAGE
-  claude-collab share [options]               host a session (Claude runs here)
-  claude-collab join <share-link> [options]   join a session (mirror + type, no Claude)
-  claude-collab help [share|join]             show help
-  claude-collab --version
+  spinal-collab share [options]               host a session (Claude runs here)
+  spinal-collab join <share-link> [options]   join a session (mirror + type, no Claude)
+  spinal-collab help [share|join]             show help
+  spinal-collab --version
 
 QUICK START
   # Host — needs Claude Code installed and logged in:
-  claude-collab share --name Alice
+  spinal-collab share --name Alice
   → prints a share link + a 6-char join code; send BOTH to your guests.
 
   # Guest — on another machine/terminal:
-  claude-collab join "<share-link>" --name Bob --code <JOINCODE>
+  spinal-collab join "<share-link>" --name Bob --code <JOINCODE>
 
 IN-SESSION
   <text> + Enter      send a prompt into the shared thread
@@ -37,15 +37,15 @@ IN-SESSION
   /end                (host) end the session for everyone
   /quit               (guest) leave the session
 
-See \`claude-collab help share\` or \`help join\` for all options and env vars.`;
+See \`spinal-collab help share\` or \`help join\` for all options and env vars.`;
 
-const SHARE_HELP = `claude-collab share — host a shared Claude Code session
+const SHARE_HELP = `spinal-collab share — host a shared Claude Code session
 
 Claude runs on THIS machine, with YOUR login, and edits YOUR files. Anyone with
 the share link + join code can drive it — but every tool call stops for YOUR y/N.
 
 USAGE
-  claude-collab share [options]
+  spinal-collab share [options]
 
 OPTIONS
   --name <name>       your display name (you'll be prompted if omitted)
@@ -59,17 +59,17 @@ ENV
   COLLAB_CONTROL_TOKEN   sent as 'Authorization: Bearer …' when minting, if the
                          relay requires it
   COLLAB_ALLOW_INSECURE=1 allow plaintext ws:// to a non-local relay (dev only)
-  COLLAB_CLAUDE_PATH     path to the 'claude' binary to drive (else found on PATH,
+  SPINAL_CLAUDE_PATH     path to the 'claude' binary to drive (else found on PATH,
                          else the SDK's bundled copy)
 
 FILES
   ~/.collab/last-session.json         last SDK session id (used by --resume)
   ~/.collab/audit/<sessionId>.jsonl   audit log: prompts + tool decisions (0600)`;
 
-const JOIN_HELP = `claude-collab join — mirror a shared session and type into it (runs no Claude)
+const JOIN_HELP = `spinal-collab join — mirror a shared session and type into it (runs no Claude)
 
 USAGE
-  claude-collab join <share-link> [options]
+  spinal-collab join <share-link> [options]
 
 ARGUMENTS
   <share-link>   the http(s):// link the host gave you
@@ -141,7 +141,7 @@ async function main(): Promise<void> {
     if (values.help) return void out(JOIN_HELP);
     const link = positionals[0];
     if (!link) {
-      fail(`join requires a share link:\n  claude-collab join "http://host:port/claude-code/<id>/"\n\n${JOIN_HELP}`);
+      fail(`join requires a share link:\n  spinal-collab join "http://host:port/claude-code/<id>/"\n\n${JOIN_HELP}`);
     }
     const displayName = await resolveDisplayName(values.name);
     const joinCode = await resolveJoinCode(values.code);

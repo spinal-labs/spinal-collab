@@ -7,7 +7,7 @@
  * transcript, no stale token flicker (deltas aren't in the replay log).
  */
 import WebSocket from 'ws';
-import { parseR2C, PROTOCOL_VERSION, type C2R, type R2C, type Role } from '@claude-collab/protocol';
+import { parseR2C, PROTOCOL_VERSION, type C2R, type R2C, type Role } from '@spinal/collab-protocol';
 
 export interface RelayClientOptions {
   url: string; // ws(s):// URL with the session id only — credentials go in headers

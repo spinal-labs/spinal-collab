@@ -13,7 +13,7 @@
  */
 import { nanoid } from 'nanoid';
 import type { SDKMessage } from '@anthropic-ai/claude-agent-sdk';
-import type { AssistantBlock, HostEventBody } from '@claude-collab/protocol';
+import type { AssistantBlock, HostEventBody } from '@spinal/collab-protocol';
 
 export interface BridgeOutput {
   /** Wire events to broadcast (in order). */

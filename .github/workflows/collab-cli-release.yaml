@@ -1,4 +1,4 @@
-name: claude-collab CLI Release
+name: spinal-collab CLI Release
 
 # Build the CLI as ONE cross-platform tarball (pnpm deploy) and publish it as a
 # GitHub Release. No external infra: artifacts live on GitHub Releases and the
@@ -14,7 +14,7 @@ on:
         default: ""
   push:
     tags:
-      - "claude-collab-v*"
+      - "spinal-collab-v*"
 
 permissions:
   contents: write # create releases + tags
@@ -33,12 +33,12 @@ jobs:
         id: meta
         run: |
           set -euo pipefail
-          if [[ "${GITHUB_REF}" == refs/tags/claude-collab-v* ]]; then
-            VERSION="${GITHUB_REF#refs/tags/claude-collab-v}"
+          if [[ "${GITHUB_REF}" == refs/tags/spinal-collab-v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/spinal-collab-v}"
           elif [[ -n "${{ inputs.version }}" ]]; then
             VERSION="${{ inputs.version }}"
           else
-            LATEST="$(gh release list --limit 1 --json tagName -q '.[0].tagName' 2>/dev/null | sed 's/^claude-collab-v//' || true)"
+            LATEST="$(gh release list --limit 1 --json tagName -q '.[0].tagName' 2>/dev/null | sed 's/^spinal-collab-v//' || true)"
             if [[ -z "$LATEST" ]]; then
               VERSION="0.1.0"
             else
@@ -48,7 +48,7 @@ jobs:
           fi
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::resolved version '$VERSION' is not semver"; exit 1; }
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=claude-collab-v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=spinal-collab-v$VERSION" >> "$GITHUB_OUTPUT"
           echo "Resolved version: $VERSION"
 
       - name: Set up Node
@@ -65,7 +65,7 @@ jobs:
           OUT_DIR: ${{ github.workspace }}/dist/cli
         run: |
           bash release/cli/build.sh
-          (cd "$OUT_DIR" && shasum -a 256 "claude-collab_${VERSION}.tar.gz" > SHA256SUMS)
+          (cd "$OUT_DIR" && shasum -a 256 "spinal-collab_${VERSION}.tar.gz" > SHA256SUMS)
           ls -la "$OUT_DIR"
           cat "$OUT_DIR/SHA256SUMS"
 
@@ -79,10 +79,10 @@ jobs:
           # Idempotent: create the release if absent, else (re)upload the assets.
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" \
-              "$OUT_DIR/claude-collab_${VERSION}.tar.gz" "$OUT_DIR/SHA256SUMS" --clobber
+              "$OUT_DIR/spinal-collab_${VERSION}.tar.gz" "$OUT_DIR/SHA256SUMS" --clobber
           else
             gh release create "$TAG" \
-              "$OUT_DIR/claude-collab_${VERSION}.tar.gz" "$OUT_DIR/SHA256SUMS" \
-              --title "claude-collab v${VERSION}" \
+              "$OUT_DIR/spinal-collab_${VERSION}.tar.gz" "$OUT_DIR/SHA256SUMS" \
+              --title "spinal-collab v${VERSION}" \
               --notes "Install: \`curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/release/cli/install.sh | sh\`"
           fi

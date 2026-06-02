@@ -1,11 +1,11 @@
 # syntax=docker/dockerfile:1
 #
-# claude-collab relay — the cloud broker (no Claude, no Python, no database, no bun).
+# spinal-collab relay — the cloud broker (no Claude, no Python, no database, no bun).
 # Pure pnpm + Node: pnpm builds the workspace and `pnpm deploy` produces a
 # self-contained app dir (real node_modules, no symlinks to the workspace), which
 # runs on a slim Node base as a non-root user.
 #
-# Image is named `claude-collab-relay` so it doesn't collide with other stacks on
+# Image is named `spinal-collab-relay` so it doesn't collide with other stacks on
 # the same registry/host.
 
 FROM node:22-bookworm-slim AS base
@@ -21,7 +21,7 @@ COPY packages ./packages
 RUN pnpm install --frozen-lockfile
 RUN pnpm build
 # Self-contained dir with only the relay's prod deps (ws, zod, nanoid, protocol).
-RUN pnpm --filter=@claude-collab/relay --prod deploy --legacy /prod/relay
+RUN pnpm --filter=@spinal/collab-relay --prod deploy --legacy /prod/relay
 
 # ---- runtime: slim Node, non-root, just the deployed app ----
 FROM node:22-bookworm-slim AS runtime

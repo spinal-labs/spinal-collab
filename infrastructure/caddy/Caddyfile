@@ -1,4 +1,4 @@
-# Auto-HTTPS reverse proxy for the claude-collab relay.
+# Auto-HTTPS reverse proxy for the spinal-collab relay.
 #
 # Caddy fetches and renews a Let's Encrypt certificate for $COLLAB_DOMAIN, then
 # terminates TLS and forwards both HTTP and the WebSocket upgrade to the relay

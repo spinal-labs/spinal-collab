@@ -1,4 +1,4 @@
-# Production relay deployment: the claude-collab relay behind Caddy (auto-HTTPS).
+# Production relay deployment: the spinal-collab relay behind Caddy (auto-HTTPS).
 # One command on any Docker host (e.g. an EC2 box) gives you a wss:// endpoint —
 # which is what the CLI requires for a non-local relay.
 #
@@ -14,16 +14,16 @@
 # Then a host connects with (guests just need the share link the host prints):
 #   COLLAB_RELAY=wss://relay.yourdomain.com \
 #   COLLAB_CONTROL_TOKEN=<the same token> \
-#   claude-collab share --name Alice
-name: claude-collab
+#   spinal-collab share --name Alice
+name: spinal-collab
 
 services:
   relay:
     build:
       context: .
       dockerfile: infrastructure/docker/relay/Dockerfile
-    image: claude-collab-relay:latest
-    container_name: claude-collab-relay
+    image: spinal-collab-relay:latest
+    container_name: spinal-collab-relay
     environment:
       - PORT=8787
       # Required: without it, anyone who can reach the relay can mint sessions.
@@ -35,7 +35,7 @@ services:
 
   caddy:
     image: caddy:2
-    container_name: claude-collab-caddy
+    container_name: spinal-collab-caddy
     environment:
       - COLLAB_DOMAIN=${COLLAB_DOMAIN:?set COLLAB_DOMAIN to your relay's public domain}
     ports:

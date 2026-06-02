@@ -38,7 +38,7 @@ puts them in a single global order so there's no race.
 ## Host a session
 
 ```bash
-claude-collab share --name Alice
+spinal-collab share --name Alice
 ```
 
 You'll see a banner with a **share link** and a **6-char join code**, the audit-log
@@ -74,7 +74,7 @@ End the session for everyone with `/end`.
 ## Join a session
 
 ```bash
-claude-collab join "https://relay.example/claude-code/abx12kc9q1/" --name Bob --code 7QF3KP
+spinal-collab join "https://relay.example/claude-code/abx12kc9q1/" --name Bob --code 7QF3KP
 ```
 
 Omit `--name`/`--code` and you'll be prompted. You'll see the live thread —
@@ -100,16 +100,16 @@ events.
 
 ## Recipes
 
-**Lock guests to observe-only.** Start with `claude-collab share --readonly-guests`,
+**Lock guests to observe-only.** Start with `spinal-collab share --readonly-guests`,
 or flip it live with `/readonly on` (`/readonly off` reopens). Guests see the change
 and their prompts are rejected by the relay while locked — handy for a demo where you
 want an audience, not co-drivers.
 
-**Resume yesterday's conversation.** `claude-collab share --resume` continues your
+**Resume yesterday's conversation.** `spinal-collab share --resume` continues your
 previous SDK conversation (the id is remembered in `~/.collab/last-session.json`).
 It mints a *new* relay session (new link + code).
 
-**Point at a remote relay.** `claude-collab share --relay wss://relay.example` (or
+**Point at a remote relay.** `spinal-collab share --relay wss://relay.example` (or
 export `COLLAB_RELAY`). Plaintext `ws://` to a non-local host is **refused**; use
 `wss://`, or `COLLAB_ALLOW_INSECURE=1` on a trusted private network.
 
@@ -143,7 +143,7 @@ export `COLLAB_RELAY`). Plaintext `ws://` to a non-local host is **refused**; us
 | `COLLAB_RELAY` | host | default relay URL |
 | `COLLAB_CONTROL_TOKEN` | host, relay | if set on the relay, `POST /sessions` requires `Authorization: Bearer <token>`; the host sends it from this same var when minting |
 | `COLLAB_ALLOW_INSECURE=1` | host, guest | allow plaintext `ws://` to a non-local relay (dev only) |
-| `COLLAB_CLAUDE_PATH` | host | path to the `claude` binary to drive (else found on `PATH`, else the SDK's bundled copy) |
+| `SPINAL_CLAUDE_PATH` | host | path to the `claude` binary to drive (else found on `PATH`, else the SDK's bundled copy) |
 
 ## Files on the host
 
@@ -178,7 +178,7 @@ README's **Relay hardening** section for the full list.
 
 | Symptom | Cause / fix |
 | --- | --- |
-| `Claude Code executable not found` (host) | Install Claude Code and log in, or set `COLLAB_CLAUDE_PATH` to the binary. |
+| `Claude Code executable not found` (host) | Install Claude Code and log in, or set `SPINAL_CLAUDE_PATH` to the binary. |
 | `refusing to send credentials over insecure ws://…` | You pointed at a non-local relay over `ws://`. Use `wss://`, or `COLLAB_ALLOW_INSECURE=1` on a trusted network. |
 | `version_mismatch … update collab` | Host and guest (or relay) are on different protocol versions. Update everyone to the same release. |
 | `observe-only: the host has disabled guest typing` | The host set `/readonly on`. Ask them for `/readonly off`. |

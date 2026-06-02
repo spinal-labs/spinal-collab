@@ -4,7 +4,7 @@
  * id/role on the wire.
  */
 import { createInterface } from 'node:readline/promises';
-import { sanitizeDisplayName } from '@claude-collab/protocol';
+import { sanitizeDisplayName } from '@spinal/collab-protocol';
 import os from 'node:os';
 
 /** Resolve a display name from a flag, else the OS username, else a prompt. */

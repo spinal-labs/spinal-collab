@@ -21,7 +21,7 @@ import {
   PROTOCOL_VERSION,
   type C2R,
   type R2C,
-} from '@claude-collab/protocol';
+} from '@spinal/collab-protocol';
 import { startTestServer } from './testHarness.js';
 
 interface Conn {

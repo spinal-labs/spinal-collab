@@ -15,7 +15,7 @@ import {
   type AssistantBlock,
   type Author,
   type R2C,
-} from '@claude-collab/protocol';
+} from '@spinal/collab-protocol';
 import { RelayClient, assertSecureTransport } from '../shared/relayClient.js';
 import {
   ansi,
