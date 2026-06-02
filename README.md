@@ -53,11 +53,12 @@ curl -fsSL https://raw.githubusercontent.com/spinal-labs/spinal-collab/main/rele
 > Pin a version with `SPINAL_COLLAB_VERSION=x.y.z`, or point at a fork with
 > `SPINAL_COLLAB_REPO=owner/repo`.
 
-The host runs Claude locally, so it needs the **standalone `claude` CLI on PATH**
-(an IDE extension alone isn't enough) — resolved via `SPINAL_CLAUDE_PATH`, else
-`claude` on `PATH`. To keep the download ~2 MB, the release prunes the Agent SDK's
-bundled Claude Code copy, so there's no fallback if `claude` is missing. Release
-tooling lives in
+The host runs Claude locally, so it needs Claude Code — **the standalone `claude`
+CLI _or_ the VS Code/Cursor extension** both work. The host resolves it via
+`SPINAL_CLAUDE_PATH`, else `claude` on `PATH`, else the IDE extension's bundled
+binary (auto-detected). Keeping the download ~2 MB, the release prunes the Agent
+SDK's own bundled copy of Claude Code — unnecessary since the host already has it.
+Release tooling lives in
 [release/cli](release/cli) (pnpm-deploy tarball + installer); the workflow
 [.github/workflows/release.yaml](.github/workflows/release.yaml)
 builds the tarball and publishes it as a **GitHub Release** (no external infra,

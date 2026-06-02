@@ -14,7 +14,7 @@
 import process from 'node:process';
 import { createInterface } from 'node:readline';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -73,9 +73,49 @@ function readPersistedSdkSession(): string | undefined {
 }
 
 /**
- * Locate the Claude Code executable to drive. Prefer the user's own install, then
- * fall back to the Agent SDK's bundled cli.js so a packaged collab install works
- * even when `claude` is not on PATH.
+ * The Claude Code IDE extension (VS Code / Cursor / etc.) ships a real `claude`
+ * binary but doesn't put it on PATH. Tons of users have Claude Code *only* via the
+ * IDE, so we discover that binary as a fallback — letting the small (SDK-pruned)
+ * release host a session with no standalone CLI install and no env vars.
+ */
+function findIdeClaudeExecutable(): string | undefined {
+  const bin = process.platform === 'win32' ? 'claude.exe' : 'claude';
+  const roots = [
+    join(homedir(), '.cursor', 'extensions'),
+    join(homedir(), '.vscode', 'extensions'),
+    join(homedir(), '.vscode-server', 'extensions'),
+    join(homedir(), '.vscode-insiders', 'extensions'),
+  ];
+  const found: { path: string; mtime: number }[] = [];
+  for (const root of roots) {
+    let entries: string[];
+    try {
+      entries = readdirSync(root);
+    } catch {
+      continue; // root doesn't exist
+    }
+    for (const e of entries) {
+      if (!e.startsWith('anthropic.claude-code-')) continue;
+      const candidate = join(root, e, 'resources', 'native-binary', bin);
+      try {
+        const st = statSync(candidate);
+        if (st.isFile()) found.push({ path: candidate, mtime: st.mtimeMs });
+      } catch {
+        /* not this version */
+      }
+    }
+  }
+  // Newest-installed wins (handles multiple extension versions side by side).
+  found.sort((a, b) => b.mtime - a.mtime);
+  return found[0]?.path;
+}
+
+/**
+ * Locate the Claude Code executable to drive, in priority order:
+ *   1. SPINAL_CLAUDE_PATH (explicit override)
+ *   2. `claude` on PATH (standalone CLI)
+ *   3. the Claude Code IDE extension's bundled binary (VS Code / Cursor / …)
+ *   4. the Agent SDK's bundled cli.js (present only in an unpruned/dev tree)
  */
 function resolveClaudeExecutable(): string | undefined {
   const explicit = process.env.SPINAL_CLAUDE_PATH?.trim();
@@ -85,13 +125,16 @@ function resolveClaudeExecutable(): string | undefined {
       encoding: 'utf8',
       shell: true,
     }).trim();
-    return found || undefined;
+    if (found) return found;
   } catch {
-    try {
-      return require.resolve('@anthropic-ai/claude-agent-sdk/cli.js');
-    } catch {
-      return undefined;
-    }
+    /* not on PATH — fall through */
+  }
+  const ide = findIdeClaudeExecutable();
+  if (ide) return ide;
+  try {
+    return require.resolve('@anthropic-ai/claude-agent-sdk/cli.js');
+  } catch {
+    return undefined;
   }
 }
 
@@ -361,8 +404,8 @@ export async function runHost(opts: HostOptions): Promise<void> {
     render.clearBottom();
     render.commit(
       paint(
-        '! Claude Code not found. Install it (https://claude.com/claude-code) so `claude` is\n' +
-          '  on your PATH, or set SPINAL_CLAUDE_PATH to the binary. (The host runs Claude locally.)',
+        '! Claude Code not found. Install it (https://claude.com/claude-code) — the CLI or the\n' +
+          '  VS Code/Cursor extension both work — or set SPINAL_CLAUDE_PATH. (The host runs Claude locally.)',
         ansi.red,
       ),
     );
