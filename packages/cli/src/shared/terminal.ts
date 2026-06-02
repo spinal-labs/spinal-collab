@@ -62,6 +62,15 @@ export function claudeTag(): string {
   return paint('[claude]', claudeColor, ansi.bold) + ' ▸ ';
 }
 
+/**
+ * Your own input prompt — `[name - role] ▸ ` in your identity color — shown on the
+ * bottom row when it's your turn to type, so the session reads like a chat: every
+ * line you send is preceded by the same nameplate you'll see it committed under.
+ */
+export function promptTag(displayName: string, role: string, id: string): string {
+  return paint(`[${displayName} - ${role}]`, colorForAuthor(id), ansi.bold) + ' ▸ ';
+}
+
 // ─────────────────────────────────────────────────────────────────── markdown
 //
 // Claude speaks Markdown; a plain terminal would show the raw markers (literal

@@ -23,6 +23,7 @@ import {
   LineRenderer,
   nameplate,
   paint,
+  promptTag,
   renderMarkdown,
   sanitizeForTerminal,
   statusBar,
@@ -61,6 +62,16 @@ export async function runGuest(opts: GuestOptions): Promise<void> {
     render.commit(line);
   }
 
+  /**
+   * Park your nameplate on the bottom row as the input prompt (chat-style), so it's
+   * clear it's your turn to type. An observe-only guest can't type, so it shows
+   * nothing there. flushLive restores this after each Claude turn.
+   */
+  function refreshPrompt(): void {
+    if (!me) return;
+    render.setStatus(readOnly ? '' : promptTag(me.displayName, me.role, me.id));
+  }
+
   const relay = new RelayClient({
     url: `${wsBase}/guest?session=${sessionId}`,
     headers: { [HEADER_JOIN_CODE]: opts.joinCode },
@@ -91,6 +102,7 @@ export async function runGuest(opts: GuestOptions): Promise<void> {
         if (readOnly) render.commit(paint('• observe-only: the host has guests in read-only mode', ansi.yellow));
         if (event.lastSeq > 0) render.commit(paint('— history —', ansi.gray));
         refreshStatus();
+        refreshPrompt();
         break;
 
       case 'transcript.user_message': {
@@ -157,8 +169,9 @@ export async function runGuest(opts: GuestOptions): Promise<void> {
         break;
 
       case 'turn.result':
-        if (!event.replay && event.costUsd != null) {
-          render.commit(paint(`  — turn ${event.subtype} ($${event.costUsd.toFixed(4)})`, ansi.gray));
+        // Per-turn success/cost is noise in a chat UI; only surface a failed turn.
+        if (!event.replay && event.subtype !== 'success') {
+          render.commit(paint(`  — turn ${event.subtype}`, ansi.yellow));
         }
         break;
 
@@ -195,6 +208,7 @@ export async function runGuest(opts: GuestOptions): Promise<void> {
           );
         }
         refreshStatus();
+        refreshPrompt(); // show/hide the input prompt as typing is opened/closed
         break;
 
       case 'error':

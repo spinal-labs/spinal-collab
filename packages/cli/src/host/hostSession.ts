@@ -37,6 +37,7 @@ import {
   LineRenderer,
   nameplate,
   paint,
+  promptTag,
   sanitizeForTerminal,
   statusBar,
 } from '../shared/terminal.js';
@@ -228,6 +229,10 @@ export async function runHost(opts: HostOptions): Promise<void> {
         sessionState = event.state;
         guestsReadOnly = event.guestsReadOnly;
         refreshStatus();
+        // Park your nameplate on the bottom row as the input prompt — it persists
+        // there (flushLive restores it after each Claude turn) so it always reads
+        // like a chat: "[Alice - host] ▸ " is where you type.
+        render.setStatus(promptTag(me.displayName, me.role, me.id));
         // Apply the host's initial guest policy once the relay knows who we are.
         if (opts.readonlyGuests && !event.guestsReadOnly) {
           relay.send({ t: 'set_policy', guestsReadOnly: true });
@@ -458,8 +463,10 @@ function renderHostEvent(render: LineRenderer, ev: HostEventBody): void {
       render.commit(paint(`  ${ev.ok ? '✓' : '✗'} ${sanitizeForTerminal(ev.summary)}`, ansi.dim));
       break;
     case 'turn.result':
-      if (ev.costUsd != null) {
-        render.commit(paint(`  — turn ${ev.subtype} ($${ev.costUsd.toFixed(4)})`, ansi.gray));
+      // The per-turn success/cost line is just noise in a chat UI. Only a FAILED
+      // turn is worth a terse note so an error isn't swallowed silently.
+      if (ev.subtype !== 'success') {
+        render.commit(paint(`  — turn ${ev.subtype}`, ansi.yellow));
       }
       break;
     default:
@@ -476,11 +483,10 @@ function printBanner(shareLink: string, joinCode: string, name: string): void {
       '',
       paint('  ┌─ collab: shared Claude Code session ─────────────────', ansi.cyan),
       paint(`  │ you        : ${name} (host)`, ansi.cyan),
+      paint('  │ Guests join with (copy–paste — it will ask their name):', ansi.cyan),
+      paint('  │   ', ansi.cyan) + paint(joinCmd, ansi.cyan, ansi.bold),
       paint('  └──────────────────────────────────────────────────────', ansi.cyan),
-      paint('  Guests join with (copy–paste — it will ask their name):', ansi.dim),
-      '    ' + paint(joinCmd, ansi.cyan, ansi.bold),
       '',
-      paint(`  (share link: ${shareLink}  ·  join code: ${joinCode})`, ansi.dim),
       paint('  ⚠ Anyone with the link + code can drive Claude on THIS machine.', ansi.red, ansi.bold),
       paint('  Type a prompt and press Enter. /end to stop.', ansi.dim),
       '',
