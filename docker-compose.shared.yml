@@ -1,0 +1,36 @@
+# Relay behind an EXISTING reverse proxy (nginx, Traefik, …) that already owns
+# 80/443. The relay publishes NO public ports — your proxy routes your domain to
+# it over a shared Docker network, reaching it as `spinal-collab-relay:8787`.
+#
+# Configure via .env:
+#   PROXY_NETWORK          the proxy's docker network to join (default: monitoring_default)
+#   COLLAB_CONTROL_TOKEN   optional — gate session minting; leave EMPTY for open minting
+#
+# Deploy:
+#   docker compose -f docker-compose.shared.yml up -d --build
+#
+# Then add a vhost on your proxy:  share.example.com → http://spinal-collab-relay:8787
+# (with WebSocket upgrade headers). See the README "Deploy behind an existing proxy".
+name: spinal-collab
+
+services:
+  relay:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/relay/Dockerfile
+    image: spinal-collab-relay:latest
+    container_name: spinal-collab-relay
+    environment:
+      - PORT=8787
+      - COLLAB_CONTROL_TOKEN=${COLLAB_CONTROL_TOKEN:-} # empty ⇒ open minting
+    expose:
+      - "8787" # internal only — the existing proxy is the public ingress
+    networks:
+      - proxy
+    restart: unless-stopped
+    # The image defines its own /health HEALTHCHECK (see the Dockerfile).
+
+networks:
+  proxy:
+    external: true
+    name: ${PROXY_NETWORK:-monitoring_default}

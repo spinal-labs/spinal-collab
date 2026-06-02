@@ -49,7 +49,7 @@ USAGE
 
 OPTIONS
   --name <name>       your display name (you'll be prompted if omitted)
-  --relay <url>       relay to use (default: $COLLAB_RELAY or ws://localhost:8787)
+  --relay <url>       relay to use (default: $COLLAB_RELAY or wss://share.getspinal.com)
   --resume            continue your previous SDK conversation
   --readonly-guests   start with guests observe-only (reopen later: /readonly off)
   -h, --help          show this help
@@ -110,7 +110,7 @@ async function main(): Promise<void> {
     const { values } = parseArgs({
       args: rest,
       options: {
-        relay: { type: 'string', default: process.env.COLLAB_RELAY ?? 'ws://localhost:8787' },
+        relay: { type: 'string', default: process.env.COLLAB_RELAY ?? 'wss://share.getspinal.com' },
         name: { type: 'string' },
         resume: { type: 'boolean', default: false },
         'readonly-guests': { type: 'boolean', default: false },

@@ -53,25 +53,33 @@ curl -fsSL https://raw.githubusercontent.com/spinal-labs/spinal-collab/main/rele
 > Pin a version with `SPINAL_COLLAB_VERSION=x.y.z`, or point at a fork with
 > `SPINAL_COLLAB_REPO=owner/repo`.
 
-The host resolves the Claude executable via `SPINAL_CLAUDE_PATH`, else `claude`
-on `PATH`, else the SDK's bundled copy. Release tooling lives in
+The host runs Claude locally, so it needs the **standalone `claude` CLI on PATH**
+(an IDE extension alone isn't enough) — resolved via `SPINAL_CLAUDE_PATH`, else
+`claude` on `PATH`. To keep the download ~2 MB, the release prunes the Agent SDK's
+bundled Claude Code copy, so there's no fallback if `claude` is missing. Release
+tooling lives in
 [release/cli](release/cli) (pnpm-deploy tarball + installer); the workflow
 [.github/workflows/release.yaml](.github/workflows/release.yaml)
 builds the tarball and publishes it as a **GitHub Release** (no external infra,
 no secrets — just the built-in `GITHUB_TOKEN`).
 
-## Run it (3 terminals, localhost)
+## Run it
+
+The installed CLI defaults to the hosted relay (`wss://share.getspinal.com`), so
+there's nothing to configure — install and go:
 
 ```bash
-# Installed CLI:
 spinal-collab share --name Alice                 # host: prints a share link + join code
 spinal-collab join "<share-link>" --name Bob --code <JOINCODE>   # guest
+```
 
-# The relay is a separate service. For local dev, run from source (pnpm):
+For **local dev** against your own relay, run from source and point at localhost:
+
+```bash
 pnpm install
-pnpm relay                          # → ws://localhost:8787
-pnpm share -- --name Alice          # host (from source, via tsx)
-pnpm join  -- "<share-link>" --name Bob --code <JOINCODE>
+pnpm relay                                        # → ws://localhost:8787
+COLLAB_RELAY=ws://localhost:8787 pnpm share -- --name Alice
+COLLAB_RELAY=ws://localhost:8787 pnpm join  -- "<share-link>" --name Bob --code <JOINCODE>
 ```
 
 Then on the host, type a prompt and press Enter — the guest sees the attributed
@@ -100,13 +108,16 @@ cp .env.example .env            # then set COLLAB_DOMAIN + COLLAB_CONTROL_TOKEN
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
-That's the whole deploy — `wss://relay.yourdomain.com`, TLS handled, minting gated.
-Hosts then point at it (guests just use the share link the host prints):
+That's the whole deploy — `wss://relay.yourdomain.com`, TLS handled. Leave
+`COLLAB_CONTROL_TOKEN` empty for **open minting** (anyone who can reach the relay
+can start a session — fine for a small team; the relay stores nothing and each
+host runs Claude on their own machine), or set it to require a bearer token.
 
-```bash
-COLLAB_RELAY=wss://relay.yourdomain.com COLLAB_CONTROL_TOKEN=<same token> \
-  spinal-collab share --name Alice
-```
+**Behind an existing proxy** (you already run nginx/Traefik on 80/443): use
+[docker-compose.shared.yml](docker-compose.shared.yml) instead — it runs the relay
+with no public ports on your proxy's Docker network (`PROXY_NETWORK`), and you add
+one vhost routing your domain → `http://spinal-collab-relay:8787` (with WebSocket
+upgrade headers).
 
 Caveats: sessions are in-memory (a relay restart drops active ones) and it's a
 single node (no horizontal scale yet) — fine for a team, see the plan for beyond.

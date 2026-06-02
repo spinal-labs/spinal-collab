@@ -9,7 +9,8 @@
 # native deps are optional `sharp`, which we exclude). The user needs Node 20+.
 #
 # The CLI drives the user's own installed Claude Code (resolved at runtime via
-# SPINAL_CLAUDE_PATH or `claude` on PATH); the bundled SDK is a fallback.
+# SPINAL_CLAUDE_PATH or `claude` on PATH). The SDK's bundled Claude Code copy is
+# pruned below to keep the tarball small (the host must have Claude Code anyway).
 #
 # Env:
 #   VERSION   required, semver (e.g. 0.1.0)
@@ -40,6 +41,19 @@ pnpm --filter=@spinal/collab --prod --no-optional deploy --legacy "$stage/app"
 # --version` reports the real release. The committed package.json stays put — the
 # published VERSION pointer (not git) is the source of truth.
 ( cd "$stage/app" && pnpm pkg set version="$VERSION" )
+
+# Prune the Agent SDK's BUNDLED Claude Code (cli.js, ~11 MB) and its vendored
+# ripgrep binaries for every platform (~35 MB). spinal-collab drives the user's
+# OWN installed Claude Code (the host must have it), so this bundled fallback
+# never runs — dropping it cuts the install ~74 MB → ~28 MB while keeping the
+# SDK's actual code (the load-bearing `query()` loop) intact.
+pruned=0
+while IFS= read -r sdk; do
+  rm -f "$sdk/cli.js"
+  rm -rf "$sdk/vendor"
+  pruned=1
+done < <(find "$stage/app/node_modules" -type d -name 'claude-agent-sdk' -path '*@anthropic-ai*')
+[ "$pruned" = 1 ] || { echo "error: claude-agent-sdk not found in deploy output (prune failed)" >&2; exit 1; }
 
 mkdir -p "$OUT_DIR"
 tarball="$OUT_DIR/spinal-collab_${VERSION}.tar.gz"

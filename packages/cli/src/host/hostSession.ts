@@ -352,14 +352,21 @@ export async function runHost(opts: HostOptions): Promise<void> {
   if (resumeId) render.commit(paint(`• resuming SDK session ${resumeId.slice(0, 8)}…`, ansi.dim));
 
   // Drive the user's installed Claude Code, not a bundled copy (see resolver).
+  // We drive the user's OWN Claude Code; the SDK's bundled copy is pruned from the
+  // release, so `claude` MUST be resolvable. Fail fast with a clear message rather
+  // than let the SDK error cryptically on a missing executable.
   const claudePath = resolveClaudeExecutable();
   if (!claudePath) {
+    render.flushLive();
+    render.clearBottom();
     render.commit(
       paint(
-        '! Claude Code executable not found. Install Claude Code, or set SPINAL_CLAUDE_PATH to the `claude` binary.',
-        ansi.yellow,
+        '! Claude Code not found. Install it (https://claude.com/claude-code) so `claude` is\n' +
+          '  on your PATH, or set SPINAL_CLAUDE_PATH to the binary. (The host runs Claude locally.)',
+        ansi.red,
       ),
     );
+    process.exit(1);
   }
 
   // ── The single SDK loop. Fed by the queue; output fanned out + rendered. ──
@@ -370,7 +377,7 @@ export async function runHost(opts: HostOptions): Promise<void> {
       permissionMode: 'default',
       canUseTool,
       resume: resumeId,
-      ...(claudePath ? { pathToClaudeCodeExecutable: claudePath } : {}),
+      pathToClaudeCodeExecutable: claudePath,
     },
   });
 
