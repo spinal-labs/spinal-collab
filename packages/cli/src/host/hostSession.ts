@@ -239,6 +239,9 @@ export async function runHost(opts: HostOptions): Promise<void> {
   let members: Author[] = [];
   let sessionState = 'active';
   let guestsReadOnly = false;
+  // Authors we've already shown as typing — guests emit a typing event per
+  // keystroke, so we only print the line on the false→true transition.
+  const typingAuthors = new Set<string>();
   let lastStatus = '';
   function refreshStatus(): void {
     const line = statusBar({ members, state: sessionState, readOnly: guestsReadOnly });
@@ -280,6 +283,8 @@ export async function runHost(opts: HostOptions): Promise<void> {
         break;
 
       case 'transcript.user_message': {
+        // Their message landed — they're no longer "typing".
+        typingAuthors.delete(event.author.id);
         // The single ordering point: push the sequenced human prompt into the
         // SDK queue (author-prefixed so Claude can attribute), and render it.
         audit.record({
@@ -314,8 +319,15 @@ export async function runHost(opts: HostOptions): Promise<void> {
         break;
 
       case 'typing':
-        if (event.isTyping && event.author.id !== me?.id) {
-          render.commit(paint(`  ${event.author.displayName} is typing…`, ansi.dim));
+        if (event.author.id !== me?.id) {
+          if (event.isTyping) {
+            if (!typingAuthors.has(event.author.id)) {
+              typingAuthors.add(event.author.id);
+              render.commit(paint(`  ${event.author.displayName} is typing…`, ansi.dim));
+            }
+          } else {
+            typingAuthors.delete(event.author.id);
+          }
         }
         break;
 

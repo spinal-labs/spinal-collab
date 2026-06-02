@@ -85,6 +85,9 @@ export async function runGuest(opts: GuestOptions): Promise<void> {
   let members: Author[] = [];
   let sessionState = 'active';
   let lastStatus = '';
+  // Authors we've already shown as typing — peers emit a typing event per
+  // keystroke, so we only print the line on the false→true transition.
+  const typingAuthors = new Set<string>();
   function refreshStatus(): void {
     const line = statusBar({ members, state: sessionState, readOnly });
     if (line === lastStatus) return;
@@ -137,6 +140,8 @@ export async function runGuest(opts: GuestOptions): Promise<void> {
         break;
 
       case 'transcript.user_message': {
+        // Their message landed — they're no longer "typing".
+        typingAuthors.delete(event.author.id);
         if (event.clientMsgId && myClientMsgIds.has(event.clientMsgId)) {
           myClientMsgIds.delete(event.clientMsgId);
           break; // already shown optimistically
@@ -220,8 +225,15 @@ export async function runGuest(opts: GuestOptions): Promise<void> {
         break;
 
       case 'typing':
-        if (event.isTyping && event.author.id !== me?.id) {
-          render.commit(paint(`  ${event.author.displayName} is typing…`, ansi.dim));
+        if (event.author.id !== me?.id) {
+          if (event.isTyping) {
+            if (!typingAuthors.has(event.author.id)) {
+              typingAuthors.add(event.author.id);
+              render.commit(paint(`  ${event.author.displayName} is typing…`, ansi.dim));
+            }
+          } else {
+            typingAuthors.delete(event.author.id);
+          }
         }
         break;
 
