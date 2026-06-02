@@ -1,4 +1,4 @@
-name: spinal-collab CLI Release
+name: Release
 
 # Build the CLI as ONE cross-platform tarball (pnpm deploy) and publish it as a
 # GitHub Release. No external infra: artifacts live on GitHub Releases and the

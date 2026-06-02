@@ -56,7 +56,7 @@ curl -fsSL https://raw.githubusercontent.com/spinal-labs/spinal-collab/main/rele
 The host resolves the Claude executable via `SPINAL_CLAUDE_PATH`, else `claude`
 on `PATH`, else the SDK's bundled copy. Release tooling lives in
 [release/cli](release/cli) (pnpm-deploy tarball + installer); the workflow
-[.github/workflows/collab-cli-release.yaml](.github/workflows/collab-cli-release.yaml)
+[.github/workflows/release.yaml](.github/workflows/release.yaml)
 builds the tarball and publishes it as a **GitHub Release** (no external infra,
 no secrets — just the built-in `GITHUB_TOKEN`).
 
