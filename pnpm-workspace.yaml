@@ -1,0 +1,7 @@
+packages:
+  - 'packages/*'
+
+# tsx (dev/test runner) pulls esbuild, which needs its postinstall to fetch a
+# binary. Allow it without the interactive approve-builds prompt.
+onlyBuiltDependencies:
+  - esbuild

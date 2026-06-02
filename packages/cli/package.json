@@ -1,0 +1,22 @@
+{
+  "name": "@claude-collab/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "claude-collab": "./dist/bin.js"
+  },
+  "main": "./dist/bin.js",
+  "scripts": {
+    "build": "tsc --build",
+    "start": "tsx src/bin.ts",
+    "test": "node --test --import tsx"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.1.0",
+    "@claude-collab/protocol": "workspace:*",
+    "nanoid": "^5.0.0",
+    "ws": "^8.18.0",
+    "zod": "^3.23.0"
+  }
+}

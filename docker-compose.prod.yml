@@ -1,0 +1,56 @@
+# Production relay deployment: the claude-collab relay behind Caddy (auto-HTTPS).
+# One command on any Docker host (e.g. an EC2 box) gives you a wss:// endpoint —
+# which is what the CLI requires for a non-local relay.
+#
+# Prerequisites
+#   - Docker + Compose v2, and this repo checked out on the host
+#   - A domain whose DNS A/AAAA record points at this host
+#   - Inbound 80 + 443 open (Caddy needs 80 for the ACME challenge, 443 to serve)
+#
+# Deploy
+#   cp .env.example .env       # set COLLAB_DOMAIN + COLLAB_CONTROL_TOKEN (auto-loaded)
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Then a host connects with (guests just need the share link the host prints):
+#   COLLAB_RELAY=wss://relay.yourdomain.com \
+#   COLLAB_CONTROL_TOKEN=<the same token> \
+#   claude-collab share --name Alice
+name: claude-collab
+
+services:
+  relay:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/relay/Dockerfile
+    image: claude-collab-relay:latest
+    container_name: claude-collab-relay
+    environment:
+      - PORT=8787
+      # Required: without it, anyone who can reach the relay can mint sessions.
+      - COLLAB_CONTROL_TOKEN=${COLLAB_CONTROL_TOKEN:?set COLLAB_CONTROL_TOKEN (e.g. openssl rand -hex 32)}
+    expose:
+      - "8787" # internal only — Caddy is the sole public ingress
+    restart: unless-stopped
+    # The image defines its own /health HEALTHCHECK (see the Dockerfile).
+
+  caddy:
+    image: caddy:2
+    container_name: claude-collab-caddy
+    environment:
+      - COLLAB_DOMAIN=${COLLAB_DOMAIN:?set COLLAB_DOMAIN to your relay's public domain}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp" # HTTP/3
+    volumes:
+      - ./infrastructure/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data # persists issued TLS certs across restarts (avoid ACME rate limits)
+      - caddy_config:/config
+    depends_on:
+      relay:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

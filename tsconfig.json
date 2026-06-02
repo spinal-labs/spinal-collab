@@ -1,0 +1,8 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/protocol" },
+    { "path": "packages/relay" },
+    { "path": "packages/cli" }
+  ]
+}

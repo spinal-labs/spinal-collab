@@ -1,0 +1,21 @@
+# Auto-HTTPS reverse proxy for the claude-collab relay.
+#
+# Caddy fetches and renews a Let's Encrypt certificate for $COLLAB_DOMAIN, then
+# terminates TLS and forwards both HTTP and the WebSocket upgrade to the relay
+# (reverse_proxy handles `Upgrade`/`Connection` transparently, and passes the
+# x-collab-token / x-collab-code credential headers through unchanged).
+#
+# Requirements (see docker-compose.prod.yml):
+#   - DNS A/AAAA record for $COLLAB_DOMAIN → this host's public IP
+#   - inbound 80 + 443 reachable (Caddy needs 80 for the ACME challenge)
+#
+# Optional: set an ACME contact email for renewal notices by uncommenting the
+# global block and providing $ACME_EMAIL.
+
+# {
+# 	email {$ACME_EMAIL}
+# }
+
+{$COLLAB_DOMAIN} {
+	reverse_proxy relay:8787
+}

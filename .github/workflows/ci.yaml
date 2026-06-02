@@ -1,0 +1,104 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      # The bug that bit us: stale dist/ or *.tsbuildinfo riding into a build
+      # makes incremental tsc skip emitting, breaking clean/Docker builds. They
+      # are gitignored — fail loudly if any are ever committed.
+      - name: Guard — no build artifacts committed
+        run: |
+          tracked="$(git ls-files | grep -E '\.tsbuildinfo$|(^|/)dist/' || true)"
+          if [ -n "$tracked" ]; then
+            echo "::error::Build artifacts are tracked in git (should be gitignored):"
+            echo "$tracked"
+            exit 1
+          fi
+          echo "OK — no dist/ or *.tsbuildinfo tracked."
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Test
+        run: pnpm test
+
+  # Builds the relay image hermetically (fresh context, no local dist/tsbuildinfo)
+  # — the strongest guard against the class of bug above, since that's exactly
+  # where it surfaced.
+  relay-image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Build relay image
+        run: docker build -f infrastructure/docker/relay/Dockerfile -t claude-collab-relay:ci .
+
+      - name: Smoke test the image
+        run: |
+          docker run -d --name relay-ci -p 8787:8787 claude-collab-relay:ci
+          for i in $(seq 1 15); do
+            if curl -fsS http://localhost:8787/health >/dev/null 2>&1; then ok=1; break; fi
+            sleep 1
+          done
+          [ "${ok:-0}" = "1" ] || { docker logs relay-ci; exit 1; }
+          curl -fsS -X POST http://localhost:8787/sessions >/dev/null
+          docker rm -f relay-ci
+
+  # Verifies the CLI release path packages cleanly into one portable tarball.
+  cli-package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable pnpm
+        run: corepack enable
+
+      - name: Package CLI tarball
+        env:
+          VERSION: 0.0.0-ci
+          OUT_DIR: ${{ github.workspace }}/dist-cli
+        run: bash release/cli/build.sh
+
+      - name: Verify the packaged CLI runs on plain node
+        run: |
+          mkdir -p /tmp/sc && tar -xzf dist-cli/claude-collab_0.0.0-ci.tar.gz -C /tmp/sc
+          node /tmp/sc/dist/bin.js 2>&1 | grep -q "claude-collab share"
+          # The packaged manifest must carry the build VERSION (not the frozen 0.1.0),
+          # so `--version` is truthful in releases.
+          test "$(node /tmp/sc/dist/bin.js --version)" = "0.0.0-ci"
+          echo "OK — packaged CLI runs and reports its version."

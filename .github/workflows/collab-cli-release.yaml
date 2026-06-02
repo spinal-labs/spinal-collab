@@ -1,0 +1,88 @@
+name: claude-collab CLI Release
+
+# Build the CLI as ONE cross-platform tarball (pnpm deploy) and publish it as a
+# GitHub Release. No external infra: artifacts live on GitHub Releases and the
+# installer (release/cli/install.sh) is served from the repo. The only credential
+# is the automatic GITHUB_TOKEN — no AWS, no Homebrew tap, no secrets to set.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Explicit version (blank = auto-bump patch from the latest release)"
+        required: false
+        default: ""
+  push:
+    tags:
+      - "claude-collab-v*"
+
+permissions:
+  contents: write # create releases + tags
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Resolve version
+        id: meta
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/claude-collab-v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/claude-collab-v}"
+          elif [[ -n "${{ inputs.version }}" ]]; then
+            VERSION="${{ inputs.version }}"
+          else
+            LATEST="$(gh release list --limit 1 --json tagName -q '.[0].tagName' 2>/dev/null | sed 's/^claude-collab-v//' || true)"
+            if [[ -z "$LATEST" ]]; then
+              VERSION="0.1.0"
+            else
+              [[ "$LATEST" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || { echo "::error::latest release '$LATEST' is not semver"; exit 1; }
+              VERSION="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((BASH_REMATCH[3] + 1))"
+            fi
+          fi
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::resolved version '$VERSION' is not semver"; exit 1; }
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=claude-collab-v$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: $VERSION"
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable pnpm
+        run: corepack enable && corepack prepare pnpm@10.30.3 --activate
+
+      - name: Build CLI tarball + checksums
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          OUT_DIR: ${{ github.workspace }}/dist/cli
+        run: |
+          bash release/cli/build.sh
+          (cd "$OUT_DIR" && shasum -a 256 "claude-collab_${VERSION}.tar.gz" > SHA256SUMS)
+          ls -la "$OUT_DIR"
+          cat "$OUT_DIR/SHA256SUMS"
+
+      - name: Publish GitHub Release
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          OUT_DIR: ${{ github.workspace }}/dist/cli
+        run: |
+          set -euo pipefail
+          # Idempotent: create the release if absent, else (re)upload the assets.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" \
+              "$OUT_DIR/claude-collab_${VERSION}.tar.gz" "$OUT_DIR/SHA256SUMS" --clobber
+          else
+            gh release create "$TAG" \
+              "$OUT_DIR/claude-collab_${VERSION}.tar.gz" "$OUT_DIR/SHA256SUMS" \
+              --title "claude-collab v${VERSION}" \
+              --notes "Install: \`curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/release/cli/install.sh | sh\`"
+          fi

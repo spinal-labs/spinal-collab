@@ -1,0 +1,13 @@
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+*.tsbuildinfo
+**/*.tsbuildinfo
+*.log
+.DS_Store
+dist-cli/
+# Local secrets for the prod relay deploy — copy .env.example → .env.
+.env
+.env.*
+!.env.example

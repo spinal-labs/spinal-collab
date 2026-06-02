@@ -1,0 +1,24 @@
+{
+  "name": "claude-collab",
+  "version": "0.1.0",
+  "private": true,
+  "description": "collab — shared Claude Code session over a cloud relay",
+  "scripts": {
+    "build": "tsc --build",
+    "clean": "tsc --build --clean",
+    "test": "node --test --import tsx packages/cli/src/host/inputQueue.test.ts packages/cli/src/shared/terminal.test.ts packages/relay/src/sessionStore.test.ts packages/relay/src/server.test.ts",
+    "relay": "tsx packages/relay/src/index.ts",
+    "share": "tsx packages/cli/src/bin.ts share",
+    "join": "tsx packages/cli/src/bin.ts join"
+  },
+  "engines": {
+    "node": ">=20.10"
+  },
+  "packageManager": "pnpm@10.30.3",
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/ws": "^8.5.10",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0"
+  }
+}

@@ -1,0 +1,30 @@
+# claude-collab relay — standalone broker.
+#
+# Naming is namespaced so this can run alongside other stacks on one host without
+# colliding (Compose prefixes every resource with the project name):
+#   project name  : claude-collab
+#   service       : relay
+#   container     : claude-collab-relay
+#   image         : claude-collab-relay
+#   host port     : 8787  (clear of common dev ports 8000/5432/8080)
+#
+# There is NO backend / database here — the relay is the only process.
+name: claude-collab
+
+services:
+  relay:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/relay/Dockerfile
+    image: claude-collab-relay:dev
+    container_name: claude-collab-relay
+    environment:
+      - PORT=8787
+    ports:
+      - "8787:8787"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8787/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
