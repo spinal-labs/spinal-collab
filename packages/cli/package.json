@@ -2,6 +2,7 @@
   "name": "@spinal/collab",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "bin": {
     "spinal-collab": "./dist/bin.js"

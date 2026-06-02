@@ -185,3 +185,10 @@ are in-memory; idle ones are reaped and `/end` deletes, but a relay restart stil
 drops history); per-tool permission formatting + "which guest triggered this"
 attribution; an optional git-worktree sandbox for the agent; opt-in
 `--share-tool-output`.
+
+## License
+
+MIT © Spinal Labs — see [LICENSE](LICENSE).
+
+spinal-collab is an independent tool for [Claude Code](https://claude.com/claude-code);
+it is not affiliated with, sponsored by, or endorsed by Anthropic.

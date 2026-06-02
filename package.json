@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "collab — shared Claude Code session over a cloud relay",
+  "license": "MIT",
   "scripts": {
     "build": "tsc --build",
     "clean": "tsc --build --clean",
