@@ -227,56 +227,73 @@ export function statusBar(opts: {
   return truncateVisible(parts.join(sep), (opts.width ?? process.stdout.columns ?? 80) - 1);
 }
 
-/**
- * Renders committed scrollback above a single, persistent bottom row. That row
- * shows the live streaming line while a turn is in flight, and the sticky status
- * bar the rest of the time — one logical region, so there's no multi-line cursor
- * math and token streaming stays a cheap in-place append (only the first token of
- * a turn repaints, to swap the status bar out for the live line).
- */
 export interface Writable {
   write(s: string): void;
 }
 
-export class LineRenderer {
-  private status = '';
-  private readonly out: Writable;
+/**
+ * The terminal's editable input line — owned by readline (terminal mode) and
+ * always pinned to the bottom. The renderer tucks it away before printing a
+ * transcript line and redraws it after, so output above never collides with what
+ * the user is mid-typing (readline preserves the in-progress buffer on redraw).
+ * A passive (no-op) implementation is used when stdin isn't a TTY.
+ */
+export interface InputLine {
+  /** Erase readline's current input render so a transcript line can be printed. */
+  clear(): void;
+  /** Redraw the prompt + the user's in-progress input below the new transcript. */
+  redraw(): void;
+}
 
-  // Streaming state. The invariant: only ONE incomplete line is ever "live" at
-  // the bottom row — as each newline arrives the line above it is committed to
-  // permanent scrollback. (The old design kept the whole multi-line turn live and
-  // re-emitted it on flush, which reprinted every line but the last.)
+/** No input line to manage (non-interactive / piped). */
+export const passiveInputLine: InputLine = { clear() {}, redraw() {} };
+
+/**
+ * Renders the transcript ABOVE a readline-owned input line.
+ *
+ * Why this shape: a terminal has exactly one "line you're appending to," and the
+ * input box wants it. So Claude's output can't share the bottom row — instead the
+ * renderer reveals it a LINE AT A TIME, committing each line above the input the
+ * moment its newline arrives (the trailing partial waits for the next newline or
+ * flushLive). Every print is sandwiched between input.clear()/redraw(), so the
+ * prompt stays put at the bottom and type-ahead is never clobbered. readline does
+ * its own echo and editing in terminal mode, so there's no cooked-mode double echo
+ * to clean up — the user's own sent line is left on screen by readline itself.
+ */
+export class LineRenderer {
+  private readonly out: Writable;
+  private readonly input: InputLine;
+
+  // Streaming accumulation: completed lines are committed as their newlines land;
+  // only the trailing incomplete line (never containing a \n) is held back.
   private streaming = false;
   private liveLabel = ''; // nameplate, carried by the FIRST line of a run only
-  private liveBody = ''; // raw text of the current incomplete line (never has a \n)
+  private liveBody = ''; // text of the current incomplete line
   private inFence = false; // inside a ``` fenced code block?
 
-  /** `out` is injectable so the renderer can be unit-tested without a real tty. */
-  constructor(out: Writable = process.stdout) {
+  /** `out`/`input` are injectable so the renderer is unit-testable without a tty. */
+  constructor(out: Writable = process.stdout, input: InputLine = passiveInputLine) {
     this.out = out;
-  }
-
-  /** The current incomplete streamed line, rendered: nameplate + Markdown body. */
-  private liveLine(): string {
-    return this.liveLabel + formatMarkdownLine(this.liveBody, this.inFence).out;
-  }
-
-  /** What currently occupies the bottom row: the live line wins while streaming. */
-  private bottom(): string {
-    return this.streaming ? this.liveLine() : this.status;
-  }
-
-  /** Print a permanent line above the bottom row, then redraw the bottom row. */
-  commit(line: string): void {
-    this.out.write('\r\x1b[K' + line + '\n' + this.bottom());
+    this.input = input;
   }
 
   /**
-   * Append streamed tokens. The first call of a run lays down `label` (the Claude
-   * nameplate) on the first line. Each embedded newline finalizes the line above
-   * it — committed to scrollback, Markdown-rendered — and the trailing remainder
-   * stays live at the bottom, repainted in place (a full repaint, since Markdown
-   * can't be applied to a bare token append).
+   * Print a permanent transcript line above the input line: tuck the input away,
+   * emit the line, then redraw the prompt + the user's in-progress text below it.
+   */
+  commit(line: string): void {
+    this.input.clear();
+    this.out.write(line + '\n');
+    this.input.redraw();
+  }
+
+  /**
+   * Feed streamed assistant tokens. Each completed line is committed above the
+   * input the moment its newline arrives (Markdown-rendered, nameplate on the
+   * first line only); the trailing partial line is held until the next newline or
+   * flushLive(). A token-by-token live line is impossible here — it would have to
+   * occupy the input's bottom row — so we reveal whole lines instead, which also
+   * keeps the input live for type-ahead throughout a turn.
    */
   appendLive(text: string, label = ''): void {
     if (!this.streaming) {
@@ -290,32 +307,26 @@ export class LineRenderer {
     for (const finished of parts) {
       const { out, inFence } = formatMarkdownLine(finished, this.inFence);
       this.inFence = inFence;
-      this.out.write('\r\x1b[K' + this.liveLabel + out + '\n');
+      this.commit(this.liveLabel + out);
       this.liveLabel = ''; // only the first line of a run carries the nameplate
     }
-    this.out.write('\r\x1b[K' + this.liveLine());
   }
 
-  /** Promote the final partial line to committed scrollback; restore the status bar. */
+  /** Commit the final partial line of a streamed turn (if any). */
   flushLive(): void {
     if (!this.streaming) return;
-    const hadContent = this.liveBody !== '' || this.liveLabel !== '';
-    const line = this.liveLine();
+    if (this.liveBody !== '' || this.liveLabel !== '') {
+      const { out } = formatMarkdownLine(this.liveBody, this.inFence);
+      this.commit(this.liveLabel + out);
+    }
     this.streaming = false;
     this.liveLabel = '';
     this.liveBody = '';
     this.inFence = false;
-    this.out.write(hadContent ? '\r\x1b[K' + line + '\n' + this.status : '\r\x1b[K' + this.status);
   }
 
-  /** Set the sticky status bar; redrawn immediately unless a turn is streaming. */
-  setStatus(text: string): void {
-    this.status = text;
-    if (!this.streaming) this.out.write('\r\x1b[K' + this.status);
-  }
-
-  /** Clear the bottom row (e.g. on shutdown) so no dangling bar is left behind. */
+  /** Erase the input line (e.g. on shutdown) so no prompt is left dangling. */
   clearBottom(): void {
-    this.out.write('\r\x1b[K');
+    this.input.clear();
   }
 }

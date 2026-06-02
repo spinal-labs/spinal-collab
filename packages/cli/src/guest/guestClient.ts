@@ -8,7 +8,7 @@
  * we're live. This is what prevents duplicated transcript and stale-token flicker.
  */
 import process from 'node:process';
-import { createInterface } from 'node:readline';
+import { clearScreenDown, createInterface, cursorTo, moveCursor } from 'node:readline';
 import { nanoid } from 'nanoid';
 import {
   HEADER_JOIN_CODE,
@@ -20,9 +20,11 @@ import { RelayClient, assertSecureTransport } from '../shared/relayClient.js';
 import {
   ansi,
   claudeTag,
+  type InputLine,
   LineRenderer,
   nameplate,
   paint,
+  passiveInputLine,
   promptTag,
   renderMarkdown,
   sanitizeForTerminal,
@@ -40,12 +42,36 @@ export async function runGuest(opts: GuestOptions): Promise<void> {
   const { wsBase, sessionId } = parseLink(opts.link);
   // Don't send the join code over plaintext to a remote relay.
   assertSecureTransport(wsBase);
-  const render = new LineRenderer();
+
+  // readline owns the editable input line at the bottom (terminal mode echoes and
+  // edits the text itself); the renderer prints transcript output ABOVE it.
+  const interactive = !!process.stdout.isTTY;
+  const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: interactive, prompt: '' });
+  // Don't draw an input line until the welcome installs the real prompt — keeps a
+  // stray default "> " from flickering under the early connection notices.
+  let promptReady = false;
+  const inputLine: InputLine = interactive
+    ? {
+        clear() {
+          if (!promptReady) return;
+          // Up over all rows the prompt+input occupies (handles wrap), then clear down.
+          const pos = rl.getCursorPos();
+          moveCursor(process.stdout, 0, -pos.rows);
+          cursorTo(process.stdout, 0);
+          clearScreenDown(process.stdout);
+        },
+        redraw() {
+          if (!promptReady) return;
+          rl.prompt(true);
+        },
+      }
+    : passiveInputLine;
+  const render = new LineRenderer(process.stdout, inputLine);
 
   let me: Author | undefined;
   let readOnly = false; // host policy: when true, this guest can only observe
   const myClientMsgIds = new Set<string>();
-  /** turnId currently streaming into the live line, if any. */
+  /** turnId currently streaming, if any. */
   let liveTurnId: string | undefined;
   // Stable for this process so our guest identity/color survives reconnects.
   const clientId = nanoid(12);
@@ -63,13 +89,14 @@ export async function runGuest(opts: GuestOptions): Promise<void> {
   }
 
   /**
-   * Park your nameplate on the bottom row as the input prompt (chat-style), so it's
-   * clear it's your turn to type. An observe-only guest can't type, so it shows
-   * nothing there. flushLive restores this after each Claude turn.
+   * Label the input prompt with your nameplate (chat-style), so it's clear it's
+   * your turn to type. An observe-only guest can't type, so it shows nothing there.
    */
   function refreshPrompt(): void {
-    if (!me) return;
-    render.setStatus(readOnly ? '' : promptTag(me.displayName, me.role, me.id));
+    if (!interactive || !me) return;
+    promptReady = true;
+    rl.setPrompt(readOnly ? '' : promptTag(me.displayName, me.role, me.id));
+    rl.prompt(true);
   }
 
   const relay = new RelayClient({
@@ -218,12 +245,17 @@ export async function runGuest(opts: GuestOptions): Promise<void> {
     }
   }
 
-  // ── stdin: optimistic echo + send; reconciled by clientMsgId on relay echo. ──
-  const rl = createInterface({ input: process.stdin });
+  // ── stdin: send + (when non-interactive) echo; reconciled by clientMsgId. ──
+  // readline echoes/edits the line itself in terminal mode, so it already leaves
+  // your own message on screen — we suppress both the optimistic and the relay
+  // echo for it (the latter via myClientMsgIds) to avoid a duplicate.
   let typingTimer: NodeJS.Timeout | undefined;
   rl.on('line', (line) => {
     const text = line.trim();
-    if (!text) return;
+    if (!text) {
+      refreshPrompt();
+      return;
+    }
     if (text === '/quit') {
       render.clearBottom();
       relay.close();
@@ -236,11 +268,15 @@ export async function runGuest(opts: GuestOptions): Promise<void> {
     }
     const clientMsgId = nanoid(8);
     myClientMsgIds.add(clientMsgId);
-    // Render our own message exactly as others see it (same nameplate everyone uses).
-    const tag = nameplate(me?.displayName ?? opts.displayName, me?.id ?? clientId);
-    render.commit(`${tag} ▸ ${sanitizeForTerminal(text)}`); // optimistic
+    // Non-interactive (piped) has no echo, so print our own line; interactive
+    // already shows it via readline's input line.
+    if (!interactive) {
+      const tag = nameplate(me?.displayName ?? opts.displayName, me?.id ?? clientId);
+      render.commit(`${tag} ▸ ${sanitizeForTerminal(text)}`);
+    }
     relay.send({ t: 'user_message', clientMsgId, content: text });
     relay.send({ t: 'typing', isTyping: false });
+    refreshPrompt();
   });
   // Whole-message typing signal: announce on first keystroke of a line, debounced.
   process.stdin.on('data', () => {
@@ -250,11 +286,13 @@ export async function runGuest(opts: GuestOptions): Promise<void> {
     typingTimer.unref?.();
   });
 
-  process.on('SIGINT', () => {
+  const quit = (): void => {
     render.clearBottom();
     relay.close();
     process.exit(0);
-  });
+  };
+  process.on('SIGINT', quit);
+  rl.on('SIGINT', quit); // terminal-mode readline traps Ctrl+C itself
 
   relay.connect();
 }

@@ -129,54 +129,60 @@ test('stripMarkdown: plain text for dim history, no ANSI', () => {
   assert.ok(s.includes('bold') && s.includes('code') && s.includes('• item'));
 });
 
-test('LineRenderer: streams a label once, repainting the live line in place', () => {
-  const out: string[] = [];
-  const r = new LineRenderer({ write: (s) => out.push(s) });
-  r.appendLive('Hello', '[claude] ▸ ');
-  r.appendLive(' world');
-  const joined = out.join('');
-  assert.ok(joined.includes('[claude] ▸ Hello'), 'label laid down on first token');
-  // No newline yet → nothing committed; the bottom row holds the full live line,
-  // repainted (not bare-appended) so Markdown can be applied to it.
-  assert.ok(out[out.length - 1]!.includes('[claude] ▸ Hello world'), 'live line repainted in full');
+/** A spy InputLine that records the clear()/redraw() calls around each commit. */
+function spyInput(log: string[]) {
+  return {
+    line: { clear: () => log.push('<clear>'), redraw: () => log.push('<redraw>') },
+    log,
+  };
+}
+
+test('LineRenderer: commit prints a line sandwiched by input clear()/redraw()', () => {
+  const log: string[] = [];
+  const { line } = spyInput(log);
+  const r = new LineRenderer({ write: (s) => log.push(s) }, line);
+  r.commit('a permanent line');
+  // The input line is tucked away, the transcript line is printed with a newline,
+  // then the prompt + in-progress buffer is redrawn below it.
+  assert.deepEqual(log, ['<clear>', 'a permanent line\n', '<redraw>']);
 });
 
-test('LineRenderer: multi-line streamed output commits each line once (no duplication)', () => {
-  const out: string[] = [];
-  const r = new LineRenderer({ write: (s) => out.push(s) });
-  // Stream three lines, then finalize — the classic shape that used to reprint
-  // every line but the last on flush.
+test('LineRenderer: multi-line streamed output commits each line once, above the input', () => {
+  const log: string[] = [];
+  const { line } = spyInput(log);
+  const r = new LineRenderer({ write: (s) => log.push(s) }, line);
+  // Stream three lines, then finalize.
   r.appendLive('line one\nline two\n', '[claude] ▸ ');
   r.appendLive('line three', '[claude] ▸ ');
   r.flushLive();
-  const joined = out.join('');
-  const count = (hay: string, needle: string) => hay.split(needle).length - 1;
-  // A line lands in permanent scrollback exactly once — counted by its committing
-  // newline. (The trailing partial line is repainted live AND finalized on the same
-  // row, so it appears twice as raw bytes but only once as a committed `…\n` line.)
-  assert.equal(count(joined, 'line one\n'), 1, 'first line committed exactly once');
-  assert.equal(count(joined, 'line two\n'), 1, 'middle line committed exactly once');
-  assert.equal(count(joined, 'line three\n'), 1, 'last line committed exactly once');
-  // The nameplate rides only the first line; continuation lines have none.
-  assert.equal(count(joined, '[claude] ▸ '), 1, 'nameplate appears once, on the first line');
+  const written = log.filter((s) => s.endsWith('\n'));
+  assert.deepEqual(
+    written,
+    ['[claude] ▸ line one\n', 'line two\n', 'line three\n'],
+    'each line committed exactly once; nameplate only on the first',
+  );
+  // Every printed line is wrapped by a clear()/redraw() pair (input stays pinned).
+  assert.equal(log.filter((s) => s === '<clear>').length, 3);
+  assert.equal(log.filter((s) => s === '<redraw>').length, 3);
 });
 
-test('LineRenderer: streamed Markdown is rendered when its line commits', () => {
-  const out: string[] = [];
-  const r = new LineRenderer({ write: (s) => out.push(s) });
+test('LineRenderer: streamed Markdown is rendered as each line commits', () => {
+  const log: string[] = [];
+  const { line } = spyInput(log);
+  const r = new LineRenderer({ write: (s) => log.push(s) }, line);
   r.appendLive('**Directories:**\nrest', '[claude] ▸ ');
-  const joined = out.join('');
+  const joined = log.join('');
   assert.ok(!joined.includes('**Directories:**'), 'raw bold markers do not survive commit');
   assert.ok(joined.includes(ansi.bold) && joined.includes('Directories:'));
+  // "rest" has no trailing newline yet — held back until the next newline/flush.
+  assert.ok(!joined.includes('rest'), 'trailing partial line is not committed early');
+  r.flushLive();
+  assert.ok(log.join('').includes('rest'), 'flushLive commits the final partial line');
 });
 
-test('LineRenderer: a committed line redraws the sticky status bar below it', () => {
+test('LineRenderer: a passive input line (non-tty) just prints lines', () => {
   const out: string[] = [];
-  const r = new LineRenderer({ write: (s) => out.push(s) });
-  r.setStatus('STATUS');
-  out.length = 0;
-  r.commit('a permanent line');
-  const joined = out.join('');
-  assert.ok(joined.includes('a permanent line\n'), 'the line is committed');
-  assert.ok(joined.endsWith('STATUS'), 'status bar is redrawn after the committed line');
+  const r = new LineRenderer({ write: (s) => out.push(s) }); // defaults to passiveInputLine
+  r.commit('hello');
+  assert.deepEqual(out, ['hello\n']);
 });

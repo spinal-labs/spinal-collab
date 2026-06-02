@@ -12,7 +12,7 @@
  * Files Claude edits land HERE, on the host, with the host's credentials.
  */
 import process from 'node:process';
-import { createInterface } from 'node:readline';
+import { clearScreenDown, createInterface, cursorTo, moveCursor } from 'node:readline';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -34,9 +34,11 @@ import { RelayClient, assertSecureTransport } from '../shared/relayClient.js';
 import {
   ansi,
   claudeTag,
+  type InputLine,
   LineRenderer,
   nameplate,
   paint,
+  passiveInputLine,
   promptTag,
   sanitizeForTerminal,
   statusBar,
@@ -154,7 +156,43 @@ export async function runHost(opts: HostOptions): Promise<void> {
   const shareLink = `${httpBase}/claude-code/${creds.sessionId}/`;
   printBanner(shareLink, creds.joinCode, opts.displayName);
 
-  const render = new LineRenderer();
+  // readline owns the editable input line at the bottom (terminal mode: it echoes
+  // and edits the text itself, so there's no cooked-mode double echo). The renderer
+  // prints all transcript output ABOVE it, tucking it away and redrawing it around
+  // each line so type-ahead is never clobbered.
+  const interactive = !!process.stdout.isTTY;
+  const rl = createInterface({ input: process.stdin, output: process.stdout, terminal: interactive, prompt: '' });
+  // Don't draw an input line until we actually have one to offer — i.e. once the
+  // relay welcome tells us who we are and installs the real "[name - role] ▸ "
+  // prompt. Until then redraw()/clear() are no-ops, so early lines (audit log,
+  // connection notices) print without a stray default "> " prompt flickering below.
+  let promptReady = false;
+  const inputLine: InputLine = interactive
+    ? {
+        clear() {
+          if (!promptReady) return;
+          // Move up over ALL rows readline's prompt+input occupies (handles a line
+          // that wrapped), then clear from there down — so no input fragment is left
+          // behind above the transcript line we're about to print.
+          const pos = rl.getCursorPos();
+          moveCursor(process.stdout, 0, -pos.rows);
+          cursorTo(process.stdout, 0);
+          clearScreenDown(process.stdout);
+        },
+        redraw() {
+          if (!promptReady) return;
+          rl.prompt(true); // redraws prompt + the in-progress buffer, preserving the edit cursor
+        },
+      }
+    : passiveInputLine;
+  const render = new LineRenderer(process.stdout, inputLine);
+  /** Install/redraw the input prompt as your nameplate once your identity is known. */
+  function redrawPrompt(): void {
+    if (!interactive || !me) return;
+    promptReady = true;
+    rl.setPrompt(promptTag(me.displayName, me.role, me.id));
+    rl.prompt(true);
+  }
   const bridge = new SdkBridge();
   const audit = new AuditLog(creds.sessionId);
   render.commit(paint(`• audit log: ${audit.path}`, ansi.dim));
@@ -229,10 +267,8 @@ export async function runHost(opts: HostOptions): Promise<void> {
         sessionState = event.state;
         guestsReadOnly = event.guestsReadOnly;
         refreshStatus();
-        // Park your nameplate on the bottom row as the input prompt — it persists
-        // there (flushLive restores it after each Claude turn) so it always reads
-        // like a chat: "[Alice - host] ▸ " is where you type.
-        render.setStatus(promptTag(me.displayName, me.role, me.id));
+        // Now that we know who we are, label the input prompt: "[Alice - host] ▸ ".
+        redrawPrompt();
         // Apply the host's initial guest policy once the relay knows who we are.
         if (opts.readonlyGuests && !event.guestsReadOnly) {
           relay.send({ t: 'set_policy', guestsReadOnly: true });
@@ -259,7 +295,11 @@ export async function runHost(opts: HostOptions): Promise<void> {
         // content is untrusted (any guest with the link). Strip terminal control
         // sequences before display so it can't spoof this host's approval UI.
         const safe = sanitizeForTerminal(event.content);
-        render.commit(`${nameplate(event.author.displayName, event.author.id)} ▸ ${safe}${suffix}`);
+        // Your OWN line was already left on screen by readline when you hit Enter —
+        // don't print it again. (When non-interactive there's no echo, so do print.)
+        if (!interactive || event.author.id !== me?.id) {
+          render.commit(`${nameplate(event.author.displayName, event.author.id)} ▸ ${safe}${suffix}`);
+        }
         break;
       }
 
@@ -330,8 +370,10 @@ export async function runHost(opts: HostOptions): Promise<void> {
       : { behavior: 'deny', message: 'Denied by host.' };
   };
 
-  // ── stdin: multiplexes permission answers and prompts on one reader. ──
-  const rl = createInterface({ input: process.stdin });
+  // ── stdin: multiplexes permission answers and prompts on the readline reader. ──
+  // (rl is created up top so the renderer can manage the input line; here we just
+  // attach the handlers.) readline echoes and edits the line itself, so there's no
+  // cooked-mode echo to scrub — we re-show the prompt after each submitted line.
   rl.on('line', (line) => {
     const text = line.trim();
 
@@ -350,10 +392,14 @@ export async function runHost(opts: HostOptions): Promise<void> {
         current.resolve(decision);
         promptNextPermission();
       }
+      redrawPrompt();
       return;
     }
 
-    if (!text) return;
+    if (!text) {
+      redrawPrompt();
+      return;
+    }
     if (text === '/end' || text === '/quit') {
       shutdown();
       return;
@@ -361,14 +407,18 @@ export async function runHost(opts: HostOptions): Promise<void> {
     // Host control: toggle the guest write policy.
     if (text === '/readonly' || text === '/readonly on') {
       relay.send({ t: 'set_policy', guestsReadOnly: true });
+      redrawPrompt();
       return;
     }
     if (text === '/readonly off') {
       relay.send({ t: 'set_policy', guestsReadOnly: false });
+      redrawPrompt();
       return;
     }
-    // Route through the relay; the echo will push it into the SDK queue.
+    // Route through the relay; the echo will push it into the SDK queue. Our own
+    // line is already on screen (readline left it there), so re-show the prompt.
     relay.send({ t: 'user_message', clientMsgId: nanoid(8), content: text });
+    redrawPrompt();
   });
 
   let shuttingDown = false;
@@ -376,8 +426,8 @@ export async function runHost(opts: HostOptions): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     render.flushLive();
-    render.clearBottom(); // drop the sticky status bar before final output
     render.commit(paint('• ending session', ansi.dim));
+    render.clearBottom(); // wipe the trailing input prompt before exit
     // Tell everyone the session ended BEFORE dropping the socket, so guests see
     // `ended` rather than the `paused` the relay would infer from a bare close.
     relay.send({ t: 'end_session' });
@@ -390,6 +440,7 @@ export async function runHost(opts: HostOptions): Promise<void> {
     }, 200).unref?.();
   }
   process.on('SIGINT', shutdown);
+  rl.on('SIGINT', shutdown); // terminal-mode readline traps Ctrl+C itself
 
   relay.connect();
 
