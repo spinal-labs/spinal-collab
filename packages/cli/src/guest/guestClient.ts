@@ -20,11 +20,13 @@ import { RelayClient, assertSecureTransport } from '../shared/relayClient.js';
 import {
   ansi,
   claudeTag,
-  colorForAuthor,
   LineRenderer,
+  nameplate,
   paint,
+  renderMarkdown,
   sanitizeForTerminal,
   statusBar,
+  stripMarkdown,
 } from '../shared/terminal.js';
 
 export interface GuestOptions {
@@ -47,13 +49,16 @@ export async function runGuest(opts: GuestOptions): Promise<void> {
   // Stable for this process so our guest identity/color survives reconnects.
   const clientId = nanoid(12);
 
-  // Sticky status-bar state, refreshed from relay events.
+  // Roster/state, surfaced as a one-off line only when it changes (no sticky bar
+  // — it fights the terminal's input line and redraws on every event).
   let members: Author[] = [];
   let sessionState = 'active';
+  let lastStatus = '';
   function refreshStatus(): void {
-    render.setStatus(
-      statusBar({ members, state: sessionState, mode: readOnly ? 'observe-only' : 'you can type' }),
-    );
+    const line = statusBar({ members, state: sessionState, readOnly });
+    if (line === lastStatus) return;
+    lastStatus = line;
+    render.commit(line);
   }
 
   const relay = new RelayClient({
@@ -93,8 +98,7 @@ export async function runGuest(opts: GuestOptions): Promise<void> {
           myClientMsgIds.delete(event.clientMsgId);
           break; // already shown optimistically
         }
-        const color = colorForAuthor(event.author.id);
-        const tag = paint(`[${event.author.displayName}]`, color, ansi.bold);
+        const tag = nameplate(event.author.displayName, event.author.id);
         const suffix = event.queued ? paint(' (queued)', ansi.yellow, ansi.italic) : '';
         // content is untrusted — strip terminal control sequences before display.
         const line = `${tag} ▸ ${sanitizeForTerminal(event.content)}${suffix}`;
@@ -116,8 +120,12 @@ export async function runGuest(opts: GuestOptions): Promise<void> {
           liveTurnId = undefined;
         } else if (text) {
           // Non-streamed (e.g. replayed history): give Claude its nameplate too.
+          // Live text renders Markdown to ANSI; dim history strips markers instead
+          // (per-span ANSI can't coexist with a single blanket dim).
           render.commit(
-            event.replay ? paint(`[claude] ▸ ${text}`, ansi.dim) : claudeTag() + text,
+            event.replay
+              ? paint(`[claude] ▸ ${stripMarkdown(text)}`, ansi.dim)
+              : claudeTag() + renderMarkdown(text),
           );
         }
         break;
@@ -214,8 +222,8 @@ export async function runGuest(opts: GuestOptions): Promise<void> {
     }
     const clientMsgId = nanoid(8);
     myClientMsgIds.add(clientMsgId);
-    // Render our own message exactly as others see it (same color, not just bold).
-    const tag = paint(`[${me?.displayName ?? opts.displayName}]`, me ? colorForAuthor(me.id) : ansi.bold, ansi.bold);
+    // Render our own message exactly as others see it (same nameplate everyone uses).
+    const tag = nameplate(me?.displayName ?? opts.displayName, me?.id ?? clientId);
     render.commit(`${tag} ▸ ${sanitizeForTerminal(text)}`); // optimistic
     relay.send({ t: 'user_message', clientMsgId, content: text });
     relay.send({ t: 'typing', isTyping: false });

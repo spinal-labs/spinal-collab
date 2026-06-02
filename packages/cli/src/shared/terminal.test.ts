@@ -10,8 +10,11 @@ import {
   claudeTag,
   colorForAuthor,
   LineRenderer,
+  nameplate,
+  renderMarkdown,
   sanitizeForTerminal,
   statusBar,
+  stripMarkdown,
 } from './terminal.js';
 
 test('strips SGR color and other CSI sequences', () => {
@@ -69,38 +72,102 @@ test('claudeTag gives Claude a labelled, colored nameplate', () => {
   assert.ok(tag.includes('▸'));
 });
 
-test('statusBar shows roster, state, and mode, and stays within width', () => {
+test('statusBar: bracketed roster with (host), notable-only badges, width-bounded', () => {
   const bar = statusBar({
     members: [
       { id: 'host', displayName: 'Alice', role: 'host' },
       { id: 'g1', displayName: 'Bob', role: 'guest' },
     ],
     state: 'active',
-    mode: 'observe-only',
+    readOnly: true,
     width: 80,
   });
-  assert.ok(bar.includes('Alice*'), 'host marked with *');
-  assert.ok(bar.includes('Bob'));
-  assert.ok(bar.includes('active'));
-  assert.ok(bar.includes('observe-only'));
+  // The roster uses the same [name] nameplate as message lines (visual consistency).
+  assert.ok(bar.includes('[Alice]') && bar.includes('(host)'), 'host marked with (host)');
+  assert.ok(bar.includes('[Bob]'));
+  assert.ok(!bar.includes('active'), 'the default "active" state is not shown (no noise)');
+  assert.ok(bar.includes('observe-only'), 'read-only surfaces a badge');
+
+  // A *notable* state (paused) IS shown.
+  const paused = statusBar({ members: [{ id: 'host', displayName: 'Alice', role: 'host' }], state: 'paused' });
+  assert.ok(paused.includes('paused'));
 
   // A very wide roster is truncated to the given width (visible chars only).
   const many = Array.from({ length: 40 }, (_, i) => ({ id: `g${i}`, displayName: `Guest${i}`, role: 'guest' }));
-  const narrow = statusBar({ members: many, state: 'active', mode: 'host', width: 30 });
+  const narrow = statusBar({ members: many, state: 'active', width: 30 });
   const visible = narrow.replace(/\x1b\[[0-9;]*m/g, ''); // eslint-disable-line no-control-regex
   assert.ok(visible.length <= 30, `truncated to width (got ${visible.length})`);
   assert.ok(visible.includes('…'), 'shows an ellipsis when truncated');
 });
 
-test('LineRenderer: streams a label once, then appends tokens in place', () => {
+test('nameplate: bracketed, colored, bold — and the same for a given id', () => {
+  const a = nameplate('Alice', 'host');
+  assert.ok(a.includes('[Alice]'));
+  assert.ok(a.includes(colorForAuthor('host')) && a.includes(ansi.bold));
+  assert.equal(nameplate('Alice', 'host'), a, 'stable for the same id');
+});
+
+test('renderMarkdown: renders emphasis/code/headings/bullets, drops the markers', () => {
+  const md = renderMarkdown('# Title\n**bold** and *em* and `code`\n- item');
+  assert.ok(!md.includes('**') && !md.includes('`'), 'raw markers are gone');
+  assert.ok(!/(^|\n)#/.test(md), 'heading hashes are gone');
+  assert.ok(md.includes(ansi.bold) && md.includes(ansi.italic) && md.includes(ansi.cyan));
+  assert.ok(md.includes('•'), 'bullet rendered as •');
+  assert.ok(md.includes('Title') && md.includes('bold') && md.includes('code'));
+});
+
+test('renderMarkdown: fenced code is colored verbatim, not emphasis-parsed', () => {
+  const md = renderMarkdown('```js\nconst x = a * b * c;\n```');
+  assert.ok(!md.includes('```'), 'fence markers are gone');
+  assert.ok(md.includes('const x = a * b * c;'), 'code body left intact (no italic mangling)');
+});
+
+test('stripMarkdown: plain text for dim history, no ANSI', () => {
+  const s = stripMarkdown('**bold** and `code`\n- item');
+  assert.ok(!s.includes('\x1b'), 'no escapes (stays uniformly dim)');
+  assert.ok(!s.includes('**') && !s.includes('`'));
+  assert.ok(s.includes('bold') && s.includes('code') && s.includes('• item'));
+});
+
+test('LineRenderer: streams a label once, repainting the live line in place', () => {
   const out: string[] = [];
   const r = new LineRenderer({ write: (s) => out.push(s) });
   r.appendLive('Hello', '[claude] ▸ ');
   r.appendLive(' world');
   const joined = out.join('');
   assert.ok(joined.includes('[claude] ▸ Hello'), 'label laid down on first token');
-  // The second token is written bare (cheap append), not re-prefixed.
-  assert.equal(out[out.length - 1], ' world');
+  // No newline yet → nothing committed; the bottom row holds the full live line,
+  // repainted (not bare-appended) so Markdown can be applied to it.
+  assert.ok(out[out.length - 1]!.includes('[claude] ▸ Hello world'), 'live line repainted in full');
+});
+
+test('LineRenderer: multi-line streamed output commits each line once (no duplication)', () => {
+  const out: string[] = [];
+  const r = new LineRenderer({ write: (s) => out.push(s) });
+  // Stream three lines, then finalize — the classic shape that used to reprint
+  // every line but the last on flush.
+  r.appendLive('line one\nline two\n', '[claude] ▸ ');
+  r.appendLive('line three', '[claude] ▸ ');
+  r.flushLive();
+  const joined = out.join('');
+  const count = (hay: string, needle: string) => hay.split(needle).length - 1;
+  // A line lands in permanent scrollback exactly once — counted by its committing
+  // newline. (The trailing partial line is repainted live AND finalized on the same
+  // row, so it appears twice as raw bytes but only once as a committed `…\n` line.)
+  assert.equal(count(joined, 'line one\n'), 1, 'first line committed exactly once');
+  assert.equal(count(joined, 'line two\n'), 1, 'middle line committed exactly once');
+  assert.equal(count(joined, 'line three\n'), 1, 'last line committed exactly once');
+  // The nameplate rides only the first line; continuation lines have none.
+  assert.equal(count(joined, '[claude] ▸ '), 1, 'nameplate appears once, on the first line');
+});
+
+test('LineRenderer: streamed Markdown is rendered when its line commits', () => {
+  const out: string[] = [];
+  const r = new LineRenderer({ write: (s) => out.push(s) });
+  r.appendLive('**Directories:**\nrest', '[claude] ▸ ');
+  const joined = out.join('');
+  assert.ok(!joined.includes('**Directories:**'), 'raw bold markers do not survive commit');
+  assert.ok(joined.includes(ansi.bold) && joined.includes('Directories:'));
 });
 
 test('LineRenderer: a committed line redraws the sticky status bar below it', () => {

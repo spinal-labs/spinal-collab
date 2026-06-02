@@ -92,6 +92,27 @@ export class RelayClient {
       this.opts.onEvent(event);
     });
 
+    ws.on('unexpected-response', (_req, res) => {
+      // The handshake was rejected before upgrading (e.g. 401 bad join code /
+      // unknown session / host already connected). A 4xx is a PERMANENT rejection,
+      // so stop retrying and surface the reason instead of looping forever.
+      const status = res.statusCode ?? 0;
+      const permanent = status >= 400 && status < 500;
+      if (permanent) this.gaveUp = true; // set synchronously so `close` won't reconnect
+      let body = '';
+      res.on('data', (c: Buffer) => {
+        body += c.toString();
+      });
+      res.on('end', () => {
+        this.opts.onEvent({
+          t: 'error',
+          code: `relay_${status || 'error'}`,
+          message: body.trim() || `relay rejected the connection (${status})`,
+          fatal: permanent,
+        });
+      });
+    });
+
     ws.on('close', () => {
       this.stopPing();
       if (this.closedByUser || this.gaveUp) {

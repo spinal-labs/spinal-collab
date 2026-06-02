@@ -48,9 +48,84 @@ export function paint(s: string, ...codes: string[]): string {
   return `${codes.join('')}${s}${ansi.reset}`;
 }
 
+/**
+ * A speaker's nameplate — `[name]` in their identity color, used identically
+ * wherever a participant is named (message lines, the status-bar roster), so the
+ * same person reads the same way everywhere.
+ */
+export function nameplate(displayName: string, id: string): string {
+  return paint(`[${displayName}]`, colorForAuthor(id), ansi.bold);
+}
+
 /** The speaker nameplate for Claude's own output — the assistant gets an identity too. */
 export function claudeTag(): string {
   return paint('[claude]', claudeColor, ansi.bold) + ' ▸ ';
+}
+
+// ─────────────────────────────────────────────────────────────────── markdown
+//
+// Claude speaks Markdown; a plain terminal would show the raw markers (literal
+// `**bold**`). These helpers render the handful of constructs Claude actually
+// emits — emphasis, inline code, ATX headings, bullets, fenced code — to ANSI.
+// Line-oriented and forgiving by design: an unterminated span (which is normal
+// mid-stream, before the closing marker has arrived) is just left as typed.
+
+/** Render inline spans (`**bold**`, `*italic*`, `` `code` ``) within one line. */
+function mdInline(s: string): string {
+  return s
+    .replace(/`([^`]+)`/g, (_m, c) => paint(c, ansi.cyan)) // `inline code`
+    .replace(/\*\*([^*]+)\*\*/g, (_m, c) => paint(c, ansi.bold)) // **bold**
+    .replace(/\*([^*\n]+)\*/g, (_m, c) => paint(c, ansi.italic)); // *italic*
+}
+
+/**
+ * Format ONE Markdown line, given whether we're inside a fenced code block, and
+ * return the rendered line plus the (possibly toggled) fence state. Per-line so
+ * the streaming renderer can commit finished lines the moment their newline lands.
+ */
+export function formatMarkdownLine(line: string, inFence: boolean): { out: string; inFence: boolean } {
+  if (/^\s*```/.test(line)) {
+    const lang = line.replace(/```/g, '').trim();
+    return { out: paint(lang || '─── code ───', ansi.dim), inFence: !inFence };
+  }
+  if (inFence) return { out: paint(line, ansi.cyan), inFence }; // code body — verbatim, no inline parsing
+  const heading = /^(#{1,6})\s+(.*)$/.exec(line);
+  if (heading) return { out: paint(mdInline(heading[2]!), ansi.bold), inFence };
+  const bullet = /^(\s*)[-*+]\s+(.*)$/.exec(line);
+  if (bullet) return { out: `${bullet[1]}${paint('•', ansi.dim)} ${mdInline(bullet[2]!)}`, inFence };
+  return { out: mdInline(line), inFence };
+}
+
+/** Render a (possibly multi-line) Markdown block to ANSI. */
+export function renderMarkdown(text: string): string {
+  let inFence = false;
+  return text
+    .split('\n')
+    .map((line) => {
+      const r = formatMarkdownLine(line, inFence);
+      inFence = r.inFence;
+      return r.out;
+    })
+    .join('\n');
+}
+
+/**
+ * Strip Markdown markers to plain text — for replayed history, which is printed
+ * uniformly dim and so can't carry the per-span ANSI that renderMarkdown emits.
+ */
+export function stripMarkdown(text: string): string {
+  return text
+    .split('\n')
+    .map((l) =>
+      l
+        .replace(/^\s*```.*$/, '')
+        .replace(/^(#{1,6})\s+/, '')
+        .replace(/^(\s*)[-*+]\s+/, '$1• ')
+        .replace(/\*\*([^*]+)\*\*/g, '$1')
+        .replace(/\*([^*\n]+)\*/g, '$1')
+        .replace(/`([^`]+)`/g, '$1'),
+    )
+    .join('\n');
 }
 
 /* eslint-disable no-control-regex */
@@ -121,17 +196,26 @@ export interface BarMember {
 export function statusBar(opts: {
   members: BarMember[];
   state: string;
-  mode: string;
+  /** Guests are observe-only — shown as a badge (only when true). */
+  readOnly?: boolean;
   width?: number;
 }): string {
   const roster =
     opts.members
-      .map((m) => paint(m.displayName + (m.role === 'host' ? '*' : ''), colorForAuthor(m.id), ansi.bold))
+      .map((m) => {
+        const name = nameplate(m.displayName, m.id);
+        return m.role === 'host' ? `${name}${paint(' (host)', ansi.gray)}` : name;
+      })
       .join(' ') || paint('(no one connected)', ansi.gray);
-  const stateColor = opts.state === 'active' ? ansi.green : opts.state === 'ended' ? ansi.red : ansi.yellow;
-  const sep = paint('·', ansi.gray);
-  const bar = `  ${roster}  ${sep}  ${paint(opts.state, stateColor)}  ${sep}  ${paint(opts.mode, ansi.gray)}`;
-  return truncateVisible(bar, (opts.width ?? process.stdout.columns ?? 80) - 1);
+  const sep = paint('  ·  ', ansi.gray);
+  // Only surface state/mode when they're *notable* — "active" and "you can type"
+  // are the boring defaults and just add noise.
+  const parts = [`  ${roster}`];
+  if (opts.state !== 'active') {
+    parts.push(paint(opts.state, opts.state === 'ended' ? ansi.red : ansi.yellow));
+  }
+  if (opts.readOnly) parts.push(paint('observe-only', ansi.yellow));
+  return truncateVisible(parts.join(sep), (opts.width ?? process.stdout.columns ?? 80) - 1);
 }
 
 /**
@@ -146,18 +230,31 @@ export interface Writable {
 }
 
 export class LineRenderer {
-  private live = '';
   private status = '';
   private readonly out: Writable;
+
+  // Streaming state. The invariant: only ONE incomplete line is ever "live" at
+  // the bottom row — as each newline arrives the line above it is committed to
+  // permanent scrollback. (The old design kept the whole multi-line turn live and
+  // re-emitted it on flush, which reprinted every line but the last.)
+  private streaming = false;
+  private liveLabel = ''; // nameplate, carried by the FIRST line of a run only
+  private liveBody = ''; // raw text of the current incomplete line (never has a \n)
+  private inFence = false; // inside a ``` fenced code block?
 
   /** `out` is injectable so the renderer can be unit-tested without a real tty. */
   constructor(out: Writable = process.stdout) {
     this.out = out;
   }
 
+  /** The current incomplete streamed line, rendered: nameplate + Markdown body. */
+  private liveLine(): string {
+    return this.liveLabel + formatMarkdownLine(this.liveBody, this.inFence).out;
+  }
+
   /** What currently occupies the bottom row: the live line wins while streaming. */
   private bottom(): string {
-    return this.live !== '' ? this.live : this.status;
+    return this.streaming ? this.liveLine() : this.status;
   }
 
   /** Print a permanent line above the bottom row, then redraw the bottom row. */
@@ -166,32 +263,46 @@ export class LineRenderer {
   }
 
   /**
-   * Append a streamed token. On the first token of a line, `label` (e.g. the
-   * Claude nameplate) is laid down and the status bar is swapped out; subsequent
-   * tokens are a cheap in-place append.
+   * Append streamed tokens. The first call of a run lays down `label` (the Claude
+   * nameplate) on the first line. Each embedded newline finalizes the line above
+   * it — committed to scrollback, Markdown-rendered — and the trailing remainder
+   * stays live at the bottom, repainted in place (a full repaint, since Markdown
+   * can't be applied to a bare token append).
    */
   appendLive(text: string, label = ''): void {
-    if (this.live === '') {
-      this.live = label + text;
-      this.out.write('\r\x1b[K' + this.live);
-    } else {
-      this.live += text;
-      this.out.write(text);
+    if (!this.streaming) {
+      this.streaming = true;
+      this.liveLabel = label;
+      this.liveBody = '';
+      this.inFence = false;
     }
+    const parts = (this.liveBody + text).split('\n');
+    this.liveBody = parts.pop() ?? ''; // the last part is the still-incomplete line
+    for (const finished of parts) {
+      const { out, inFence } = formatMarkdownLine(finished, this.inFence);
+      this.inFence = inFence;
+      this.out.write('\r\x1b[K' + this.liveLabel + out + '\n');
+      this.liveLabel = ''; // only the first line of a run carries the nameplate
+    }
+    this.out.write('\r\x1b[K' + this.liveLine());
   }
 
-  /** Promote the streamed line to committed scrollback; restore the status bar. */
+  /** Promote the final partial line to committed scrollback; restore the status bar. */
   flushLive(): void {
-    if (this.live) {
-      this.out.write('\r\x1b[K' + this.live + '\n' + this.status);
-      this.live = '';
-    }
+    if (!this.streaming) return;
+    const hadContent = this.liveBody !== '' || this.liveLabel !== '';
+    const line = this.liveLine();
+    this.streaming = false;
+    this.liveLabel = '';
+    this.liveBody = '';
+    this.inFence = false;
+    this.out.write(hadContent ? '\r\x1b[K' + line + '\n' + this.status : '\r\x1b[K' + this.status);
   }
 
   /** Set the sticky status bar; redrawn immediately unless a turn is streaming. */
   setStatus(text: string): void {
     this.status = text;
-    if (this.live === '') this.out.write('\r\x1b[K' + this.status);
+    if (!this.streaming) this.out.write('\r\x1b[K' + this.status);
   }
 
   /** Clear the bottom row (e.g. on shutdown) so no dangling bar is left behind. */

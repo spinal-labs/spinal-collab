@@ -34,8 +34,8 @@ import { RelayClient, assertSecureTransport } from '../shared/relayClient.js';
 import {
   ansi,
   claudeTag,
-  colorForAuthor,
   LineRenderer,
+  nameplate,
   paint,
   sanitizeForTerminal,
   statusBar,
@@ -191,18 +191,17 @@ export async function runHost(opts: HostOptions): Promise<void> {
 
   let me: Author | undefined;
 
-  // Sticky status-bar state, refreshed from relay events.
+  // Roster/state, surfaced as a one-off line only when it changes — a sticky
+  // bottom bar fights the terminal's own input line and redraws on every event.
   let members: Author[] = [];
   let sessionState = 'active';
   let guestsReadOnly = false;
+  let lastStatus = '';
   function refreshStatus(): void {
-    render.setStatus(
-      statusBar({
-        members,
-        state: sessionState,
-        mode: guestsReadOnly ? 'host · guests: read-only' : 'host',
-      }),
-    );
+    const line = statusBar({ members, state: sessionState, readOnly: guestsReadOnly });
+    if (line === lastStatus) return; // no change → don't reprint
+    lastStatus = line;
+    render.commit(line);
   }
 
   const relay = new RelayClient({
@@ -251,12 +250,11 @@ export async function runHost(opts: HostOptions): Promise<void> {
           parent_tool_use_id: null,
           session_id: '',
         } as SDKUserMessage);
-        const color = colorForAuthor(event.author.id);
         const suffix = event.queued ? paint(' (queued)', ansi.yellow, ansi.italic) : '';
         // content is untrusted (any guest with the link). Strip terminal control
         // sequences before display so it can't spoof this host's approval UI.
         const safe = sanitizeForTerminal(event.content);
-        render.commit(`${paint(tag, color, ansi.bold)} ▸ ${safe}${suffix}`);
+        render.commit(`${nameplate(event.author.displayName, event.author.id)} ▸ ${safe}${suffix}`);
         break;
       }
 
@@ -472,15 +470,18 @@ function renderHostEvent(render: LineRenderer, ev: HostEventBody): void {
 // ─────────────────────────────────────────────────────────────────── helpers
 
 function printBanner(shareLink: string, joinCode: string, name: string): void {
+  const joinCmd = `spinal-collab join "${shareLink}" --code ${joinCode}`;
   process.stdout.write(
     [
       '',
       paint('  ┌─ collab: shared Claude Code session ─────────────────', ansi.cyan),
-      paint(`  │ share link : ${shareLink}`, ansi.cyan),
-      paint(`  │ join code  : ${paint(joinCode, ansi.bold)}`, ansi.cyan),
       paint(`  │ you        : ${name} (host)`, ansi.cyan),
       paint('  └──────────────────────────────────────────────────────', ansi.cyan),
-      paint('  Anyone with the link + code can drive Claude on THIS machine.', ansi.yellow),
+      paint('  Guests join with (copy–paste — it will ask their name):', ansi.dim),
+      '    ' + paint(joinCmd, ansi.cyan, ansi.bold),
+      '',
+      paint(`  (share link: ${shareLink}  ·  join code: ${joinCode})`, ansi.dim),
+      paint('  ⚠ Anyone with the link + code can drive Claude on THIS machine.', ansi.red, ansi.bold),
       paint('  Type a prompt and press Enter. /end to stop.', ansi.dim),
       '',
     ].join('\n') + '\n',
