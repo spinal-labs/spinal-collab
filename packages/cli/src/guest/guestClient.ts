@@ -54,11 +54,15 @@ export async function runGuest(opts: GuestOptions): Promise<void> {
     ? {
         clear() {
           if (!promptReady) return;
-          // Up over all rows the prompt+input occupies (handles wrap), then clear down.
+          // Up over all rows the prompt+input occupies (wrap, or the two-line
+          // nameplate prompt), then clear down — no input fragment left behind.
           const pos = rl.getCursorPos();
           moveCursor(process.stdout, 0, -pos.rows);
           cursorTo(process.stdout, 0);
           clearScreenDown(process.stdout);
+          // Reset readline's row count so the next prompt(true) won't erase the line
+          // we print. readline restores it on the redraw. (Internal; stable 18–22.)
+          (rl as unknown as { prevRows?: number }).prevRows = 0;
         },
         redraw() {
           if (!promptReady) return;
@@ -140,8 +144,14 @@ export async function runGuest(opts: GuestOptions): Promise<void> {
         const tag = nameplate(event.author.displayName, event.author.id);
         const suffix = event.queued ? paint(' (queued)', ansi.yellow, ansi.italic) : '';
         // content is untrusted — strip terminal control sequences before display.
-        const line = `${tag} ▸ ${sanitizeForTerminal(event.content)}${suffix}`;
-        render.commit(event.replay ? paint(line, ansi.dim) : line);
+        const body = sanitizeForTerminal(event.content);
+        if (event.replay) {
+          render.commit(paint(`${tag}${suffix}`, ansi.dim));
+          render.commit(paint(body, ansi.dim));
+        } else {
+          render.commit(`${tag}${suffix}`); // nameplate line
+          render.commit(body); // message body underneath
+        }
         break;
       }
 
@@ -158,14 +168,16 @@ export async function runGuest(opts: GuestOptions): Promise<void> {
           render.flushLive();
           liveTurnId = undefined;
         } else if (text) {
-          // Non-streamed (e.g. replayed history): give Claude its nameplate too.
-          // Live text renders Markdown to ANSI; dim history strips markers instead
-          // (per-span ANSI can't coexist with a single blanket dim).
-          render.commit(
-            event.replay
-              ? paint(`[claude] ▸ ${stripMarkdown(text)}`, ansi.dim)
-              : claudeTag() + renderMarkdown(text),
-          );
+          // Non-streamed (e.g. replayed history): nameplate on its own line, body
+          // beneath. Live text renders Markdown to ANSI; dim history strips markers
+          // instead (per-span ANSI can't coexist with a single blanket dim).
+          if (event.replay) {
+            render.commit(paint('[claude]', ansi.dim));
+            render.commit(paint(stripMarkdown(text), ansi.dim));
+          } else {
+            render.commit(claudeTag()); // [claude] header line
+            render.commit(renderMarkdown(text)); // body underneath
+          }
         }
         break;
       }
@@ -271,8 +283,8 @@ export async function runGuest(opts: GuestOptions): Promise<void> {
     // Non-interactive (piped) has no echo, so print our own line; interactive
     // already shows it via readline's input line.
     if (!interactive) {
-      const tag = nameplate(me?.displayName ?? opts.displayName, me?.id ?? clientId);
-      render.commit(`${tag} ▸ ${sanitizeForTerminal(text)}`);
+      render.commit(nameplate(me?.displayName ?? opts.displayName, me?.id ?? clientId));
+      render.commit(sanitizeForTerminal(text));
     }
     relay.send({ t: 'user_message', clientMsgId, content: text });
     relay.send({ t: 'typing', isTyping: false });

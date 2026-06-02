@@ -172,12 +172,16 @@ export async function runHost(opts: HostOptions): Promise<void> {
         clear() {
           if (!promptReady) return;
           // Move up over ALL rows readline's prompt+input occupies (handles a line
-          // that wrapped), then clear from there down — so no input fragment is left
-          // behind above the transcript line we're about to print.
+          // that wrapped, or the two-line nameplate prompt), then clear from there
+          // down — so no input fragment is left above the line we're about to print.
           const pos = rl.getCursorPos();
           moveCursor(process.stdout, 0, -pos.rows);
           cursorTo(process.stdout, 0);
           clearScreenDown(process.stdout);
+          // Tell readline its prior render is gone, so the next prompt(true) won't
+          // move up over (and erase) the line we print. readline resets this itself
+          // on the redraw. (Internal field; stable across Node 18–22.)
+          (rl as unknown as { prevRows?: number }).prevRows = 0;
         },
         redraw() {
           if (!promptReady) return;
@@ -298,7 +302,8 @@ export async function runHost(opts: HostOptions): Promise<void> {
         // Your OWN line was already left on screen by readline when you hit Enter —
         // don't print it again. (When non-interactive there's no echo, so do print.)
         if (!interactive || event.author.id !== me?.id) {
-          render.commit(`${nameplate(event.author.displayName, event.author.id)} ▸ ${safe}${suffix}`);
+          render.commit(`${nameplate(event.author.displayName, event.author.id)}${suffix}`); // nameplate line
+          render.commit(safe); // message body underneath
         }
         break;
       }

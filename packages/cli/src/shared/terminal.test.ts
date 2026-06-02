@@ -11,6 +11,7 @@ import {
   colorForAuthor,
   LineRenderer,
   nameplate,
+  promptTag,
   renderMarkdown,
   sanitizeForTerminal,
   statusBar,
@@ -65,11 +66,16 @@ test('identity colors never overlap the status colors', () => {
   assert.ok(!status.has(ansi.brightMagenta));
 });
 
-test('claudeTag gives Claude a labelled, colored nameplate', () => {
+test('claudeTag gives Claude a labelled, colored nameplate (its own header line)', () => {
   const tag = claudeTag();
   assert.ok(tag.includes('[claude]'));
   assert.ok(tag.includes(ansi.brightMagenta));
-  assert.ok(tag.includes('▸'));
+});
+
+test('promptTag: nameplate with role, on its own line (trailing newline)', () => {
+  const p = promptTag('Alice', 'host', 'host');
+  assert.ok(p.includes('[Alice - host]'));
+  assert.ok(p.endsWith('\n'), 'cursor drops to the next line for typing');
 });
 
 test('statusBar: bracketed roster with (host), notable-only badges, width-bounded', () => {
@@ -147,31 +153,41 @@ test('LineRenderer: commit prints a line sandwiched by input clear()/redraw()', 
   assert.deepEqual(log, ['<clear>', 'a permanent line\n', '<redraw>']);
 });
 
-test('LineRenderer: multi-line streamed output commits each line once, above the input', () => {
+test('LineRenderer: streamed nameplate is its own line, then one line per body line', () => {
   const log: string[] = [];
   const { line } = spyInput(log);
   const r = new LineRenderer({ write: (s) => log.push(s) }, line);
   // Stream three lines, then finalize.
-  r.appendLive('line one\nline two\n', '[claude] ▸ ');
-  r.appendLive('line three', '[claude] ▸ ');
+  r.appendLive('line one\nline two\n', '[claude]');
+  r.appendLive('line three', '[claude]');
   r.flushLive();
   const written = log.filter((s) => s.endsWith('\n'));
   assert.deepEqual(
     written,
-    ['[claude] ▸ line one\n', 'line two\n', 'line three\n'],
-    'each line committed exactly once; nameplate only on the first',
+    ['[claude]\n', 'line one\n', 'line two\n', 'line three\n'],
+    'nameplate on its own line, then each body line once (no per-line nameplate)',
   );
   // Every printed line is wrapped by a clear()/redraw() pair (input stays pinned).
-  assert.equal(log.filter((s) => s === '<clear>').length, 3);
-  assert.equal(log.filter((s) => s === '<redraw>').length, 3);
+  assert.equal(log.filter((s) => s === '<clear>').length, 4);
+  assert.equal(log.filter((s) => s === '<redraw>').length, 4);
+});
+
+test('LineRenderer: no nameplate is emitted for an empty stream', () => {
+  const log: string[] = [];
+  const { line } = spyInput(log);
+  const r = new LineRenderer({ write: (s) => log.push(s) }, line);
+  r.appendLive('', '[claude]'); // a streaming turn that produces no text
+  r.flushLive();
+  assert.deepEqual(log.filter((s) => s.endsWith('\n')), [], 'no dangling nameplate with no body');
 });
 
 test('LineRenderer: streamed Markdown is rendered as each line commits', () => {
   const log: string[] = [];
   const { line } = spyInput(log);
   const r = new LineRenderer({ write: (s) => log.push(s) }, line);
-  r.appendLive('**Directories:**\nrest', '[claude] ▸ ');
+  r.appendLive('**Directories:**\nrest', '[claude]');
   const joined = log.join('');
+  assert.ok(joined.includes('[claude]\n'), 'nameplate printed on its own line first');
   assert.ok(!joined.includes('**Directories:**'), 'raw bold markers do not survive commit');
   assert.ok(joined.includes(ansi.bold) && joined.includes('Directories:'));
   // "rest" has no trailing newline yet — held back until the next newline/flush.

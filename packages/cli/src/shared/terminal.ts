@@ -57,18 +57,19 @@ export function nameplate(displayName: string, id: string): string {
   return paint(`[${displayName}]`, colorForAuthor(id), ansi.bold);
 }
 
-/** The speaker nameplate for Claude's own output — the assistant gets an identity too. */
+/** The speaker nameplate for Claude's own output — its own header line, like everyone else. */
 export function claudeTag(): string {
-  return paint('[claude]', claudeColor, ansi.bold) + ' ▸ ';
+  return paint('[claude]', claudeColor, ansi.bold);
 }
 
 /**
- * Your own input prompt — `[name - role] ▸ ` in your identity color — shown on the
- * bottom row when it's your turn to type, so the session reads like a chat: every
- * line you send is preceded by the same nameplate you'll see it committed under.
+ * Your own input prompt — your `[name - role]` nameplate on its OWN line, with the
+ * cursor on the line below (the trailing newline), so the session reads like a
+ * chat: a speaker label, then their message underneath. Same shape as every
+ * committed message, so your input lines up with what you'll see it sent as.
  */
 export function promptTag(displayName: string, role: string, id: string): string {
-  return paint(`[${displayName} - ${role}]`, colorForAuthor(id), ansi.bold) + ' ▸ ';
+  return paint(`[${displayName} - ${role}]`, colorForAuthor(id), ansi.bold) + '\n';
 }
 
 // ─────────────────────────────────────────────────────────────────── markdown
@@ -267,7 +268,7 @@ export class LineRenderer {
   // Streaming accumulation: completed lines are committed as their newlines land;
   // only the trailing incomplete line (never containing a \n) is held back.
   private streaming = false;
-  private liveLabel = ''; // nameplate, carried by the FIRST line of a run only
+  private headerPending = ''; // speaker nameplate, printed on its OWN line before the body
   private liveBody = ''; // text of the current incomplete line
   private inFence = false; // inside a ``` fenced code block?
 
@@ -288,39 +289,49 @@ export class LineRenderer {
   }
 
   /**
-   * Feed streamed assistant tokens. Each completed line is committed above the
-   * input the moment its newline arrives (Markdown-rendered, nameplate on the
-   * first line only); the trailing partial line is held until the next newline or
-   * flushLive(). A token-by-token live line is impossible here — it would have to
-   * occupy the input's bottom row — so we reveal whole lines instead, which also
-   * keeps the input live for type-ahead throughout a turn.
+   * Feed streamed assistant tokens. The speaker nameplate (`label`) is committed
+   * once, on its own line, just before the first body line; each body line is then
+   * committed above the input the moment its newline arrives (Markdown-rendered).
+   * The trailing partial line is held until the next newline or flushLive(). A
+   * token-by-token live line is impossible here — it would have to occupy the
+   * input's bottom row — so we reveal whole lines instead, which also keeps the
+   * input live for type-ahead throughout a turn.
    */
   appendLive(text: string, label = ''): void {
     if (!this.streaming) {
       this.streaming = true;
-      this.liveLabel = label;
+      this.headerPending = label;
       this.liveBody = '';
       this.inFence = false;
     }
     const parts = (this.liveBody + text).split('\n');
     this.liveBody = parts.pop() ?? ''; // the last part is the still-incomplete line
     for (const finished of parts) {
+      this.emitHeader();
       const { out, inFence } = formatMarkdownLine(finished, this.inFence);
       this.inFence = inFence;
-      this.commit(this.liveLabel + out);
-      this.liveLabel = ''; // only the first line of a run carries the nameplate
+      this.commit(out);
+    }
+  }
+
+  /** Print the speaker nameplate on its own line, once, before the first body line. */
+  private emitHeader(): void {
+    if (this.headerPending) {
+      this.commit(this.headerPending);
+      this.headerPending = '';
     }
   }
 
   /** Commit the final partial line of a streamed turn (if any). */
   flushLive(): void {
     if (!this.streaming) return;
-    if (this.liveBody !== '' || this.liveLabel !== '') {
+    if (this.liveBody !== '') {
+      this.emitHeader(); // a body with no newline yet still gets its nameplate
       const { out } = formatMarkdownLine(this.liveBody, this.inFence);
-      this.commit(this.liveLabel + out);
+      this.commit(out);
     }
     this.streaming = false;
-    this.liveLabel = '';
+    this.headerPending = '';
     this.liveBody = '';
     this.inFence = false;
   }
